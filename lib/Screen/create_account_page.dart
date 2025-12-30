@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../services/api_service.dart';
 
 class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({super.key});
@@ -25,6 +26,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
+  String? _errorMessage;
   
   @override
   void dispose() {
@@ -91,6 +93,37 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
+
+                    // Error Message
+                    if (_errorMessage != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.red.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage!,
+                                style: const TextStyle(color: Colors.red, fontSize: 13),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 18, color: Colors.red),
+                              onPressed: () => setState(() => _errorMessage = null),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
                     
                     // Required Fields Section
                     _buildSectionHeader('Required Information'),
@@ -111,6 +144,16 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       hint: 'Enter username or phone number',
                       icon: Icons.account_circle_outlined,
                       validator: _validateUsername,
+                    ),
+                    const SizedBox(height: 16),
+
+                    _buildTextField(
+                      controller: _emailController,
+                      label: 'Email Address',
+                      hint: 'your.email@example.com',
+                      icon: Icons.email_outlined,
+                      keyboardType: TextInputType.emailAddress,
+                      validator: _validateEmail,
                     ),
                     const SizedBox(height: 16),
                     
@@ -147,16 +190,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     
                     // Optional Fields Section
                     _buildSectionHeader('Optional Information'),
-                    const SizedBox(height: 16),
-                    
-                    _buildTextField(
-                      controller: _emailController,
-                      label: 'Email Address (Optional)',
-                      hint: 'your.email@example.com',
-                      icon: Icons.email_outlined,
-                      keyboardType: TextInputType.emailAddress,
-                      required: false,
-                    ),
                     const SizedBox(height: 16),
                     
                     _buildTextField(
@@ -331,9 +364,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     if (value.trim().length < 3) {
       return 'Name must be at least 3 characters';
     }
-    if (!RegExp(r'^[a-zA-Z\s]+$').hasMatch(value)) {
-      return 'Name can only contain letters';
-    }
     return null;
   }
   
@@ -343,6 +373,16 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     }
     if (value.trim().length < 3) {
       return 'Username must be at least 3 characters';
+    }
+    return null;
+  }
+
+  String? _validateEmail(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Email is required';
+    }
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+      return 'Please enter a valid email';
     }
     return null;
   }
@@ -381,21 +421,32 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   }
   
   Future<void> _handleCreateAccount() async {
+    // Clear previous error
+    setState(() => _errorMessage = null);
+
     if (!_formKey.currentState!.validate()) {
       return;
     }
     
     setState(() => _isLoading = true);
     
-    // Simulate API call
-    await Future.delayed(const Duration(seconds: 2));
+    // Call API
+    final response = await ApiService.register(
+      name: _fullNameController.text.trim(),
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+      passwordConfirmation: _confirmPasswordController.text,
+      phone: _phoneController.text.isNotEmpty ? _phoneController.text.trim() : null,
+    );
     
+    if (!mounted) return;
+
     setState(() => _isLoading = false);
     
-    if (mounted) {
+    if (response.success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Account created successfully!'),
+          content: const Text('Account created successfully! Please login.'),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -404,6 +455,17 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       
       // Navigate back to login
       Navigator.pop(context);
+    } else {
+      setState(() => _errorMessage = response.message ?? 'Failed to create account');
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(response.message ?? 'Failed to create account'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
     }
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'auth_models.dart';
+import '../services/api_service.dart';
 
 enum ShiftView { daily, weekly, monthly }
 
@@ -15,83 +16,83 @@ class _ShiftsPageState extends State<ShiftsPage> {
   ShiftView currentView = ShiftView.weekly;
   DateTime selectedDate = DateTime.now();
   
-  // Mock employees with availability
-  final List<Map<String, dynamic>> employees = [
-    {
-      'id': 1,
-      'name': 'Ahmed Ali',
-      'role': 'Waiter',
-      'availability': {
-        'monday': ['09:00-17:00'],
-        'tuesday': ['09:00-17:00'],
-        'wednesday': ['09:00-17:00'],
-        'thursday': ['09:00-17:00'],
-        'friday': ['09:00-17:00'],
-      },
-    },
-    {
-      'id': 2,
-      'name': 'Sara Mohammed',
-      'role': 'Chef',
-      'availability': {
-        'monday': ['14:00-22:00'],
-        'tuesday': ['14:00-22:00'],
-        'wednesday': ['14:00-22:00'],
-        'thursday': ['14:00-22:00'],
-        'friday': ['14:00-22:00'],
-        'saturday': ['14:00-22:00'],
-      },
-    },
-    {
-      'id': 3,
-      'name': 'Omar Hassan',
-      'role': 'Manager',
-      'availability': {
-        'monday': ['08:00-20:00'],
-        'tuesday': ['08:00-20:00'],
-        'wednesday': ['08:00-20:00'],
-        'thursday': ['08:00-20:00'],
-        'friday': ['08:00-20:00'],
-        'saturday': ['08:00-16:00'],
-      },
-    },
-  ];
-  
-  // Mock shifts
+  // State Variables
   List<Map<String, dynamic>> shifts = [];
-  
+  List<Map<String, dynamic>> employees = [];
+  bool isLoading = true;
+  bool isLoadingEmployees = false;
+  String? errorMessage;
+
   @override
   void initState() {
     super.initState();
-    _loadMockShifts();
+    _loadData();
   }
-  
-  void _loadMockShifts() {
-    final now = DateTime.now();
-    shifts = [
-      {
-        'id': 1,
-        'employeeId': 1,
-        'employeeName': 'Ahmed Ali',
-        'date': DateTime(now.year, now.month, now.day),
-        'startTime': '09:00',
-        'endTime': '17:00',
-        'type': 'Morning Shift',
-        'color': Colors.blue,
-      },
-      {
-        'id': 2,
-        'employeeId': 2,
-        'employeeName': 'Sara Mohammed',
-        'date': DateTime(now.year, now.month, now.day),
-        'startTime': '14:00',
-        'endTime': '22:00',
-        'type': 'Evening Shift',
-        'color': Colors.orange,
-      },
-    ];
+
+  Future<void> _loadData() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
+
+    await Future.wait([
+      _loadShifts(),
+      _loadEmployees(),
+    ]);
   }
-  
+
+  Future<void> _loadShifts() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isAdmin = authProvider.isAdmin;
+
+    ApiResponse response;
+    if (isAdmin) {
+      response = await ApiService.getShifts();
+    } else {
+      response = await ApiService.getMyCurrentShift();
+    }
+
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          if (isAdmin) {
+            shifts = List<Map<String, dynamic>>.from(response.data['data'] ?? []);
+          } else {
+            // For employee, wrap single shift in list or get schedule
+            if (response.data is List) {
+              shifts = List<Map<String, dynamic>>.from(response.data);
+            } else if (response.data['schedule'] != null) {
+              shifts = List<Map<String, dynamic>>.from(response.data['schedule']);
+            } else {
+              shifts = [Map<String, dynamic>.from(response.data)];
+            }
+          }
+        } else {
+          errorMessage = response.message;
+        }
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadEmployees() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (!authProvider.isAdmin) return;
+
+    setState(() => isLoadingEmployees = true);
+
+    final response = await ApiService.getEmployees(perPage: 100);
+
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          employees = List<Map<String, dynamic>>.from(response.data['data'] ?? []);
+        }
+        isLoadingEmployees = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
@@ -100,8 +101,16 @@ class _ShiftsPageState extends State<ShiftsPage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('Shift Management', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          isAdmin ? 'Shift Management' : 'My Schedule',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadData,
+            tooltip: 'Refresh',
+          ),
           _buildViewSelector(),
           if (isAdmin) ...[
             IconButton(icon: const Icon(Icons.download), onPressed: _exportSchedule, tooltip: 'Export'),
@@ -109,15 +118,40 @@ class _ShiftsPageState extends State<ShiftsPage> {
           ],
         ],
       ),
-      body: Column(
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        child: Column(
+          children: [
+            _buildDateNavigator(),
+            Expanded(
+              child: isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : errorMessage != null
+                      ? _buildErrorState()
+                      : _buildCurrentView(),
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: isAdmin ? _buildAddShiftFAB() : null,
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _buildDateNavigator(),
-          Expanded(
-            child: _buildCurrentView(),
+          Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+          const SizedBox(height: 16),
+          Text(errorMessage ?? 'An error occurred'),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _loadData,
+            child: const Text('Retry'),
           ),
         ],
       ),
-      floatingActionButton: isAdmin ? _buildAddShiftFAB() : null,
     );
   }
   
@@ -288,7 +322,7 @@ class _ShiftsPageState extends State<ShiftsPage> {
   }
   
   Widget _buildDailyView() {
-    final todayShifts = shifts.where((s) => _isSameDay(s['date'], selectedDate)).toList();
+    final todayShifts = _getShiftsForDate(selectedDate);
     
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -306,7 +340,7 @@ class _ShiftsPageState extends State<ShiftsPage> {
                 children: [
                   Icon(Icons.event_busy, size: 64, color: Theme.of(context).colorScheme.primary.withValues(alpha: 128)),
                   const SizedBox(height: 16),
-                  Text('No shifts scheduled for today', style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color)),
+                  Text('No shifts scheduled for this day', style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color)),
                 ],
               ),
             ),
@@ -324,7 +358,7 @@ class _ShiftsPageState extends State<ShiftsPage> {
       padding: const EdgeInsets.all(16),
       children: List.generate(7, (dayIndex) {
         final date = weekStart.add(Duration(days: dayIndex));
-        final dayShifts = shifts.where((s) => _isSameDay(s['date'], date)).toList();
+        final dayShifts = _getShiftsForDate(date);
         
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -382,37 +416,178 @@ class _ShiftsPageState extends State<ShiftsPage> {
   }
   
   Widget _buildMonthlyView() {
-    return Center(child: Text('Monthly Calendar View - Coming Soon', style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color)));
+    final firstDayOfMonth = DateTime(selectedDate.year, selectedDate.month, 1);
+    final lastDayOfMonth = DateTime(selectedDate.year, selectedDate.month + 1, 0);
+    final daysInMonth = lastDayOfMonth.day;
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 7,
+        childAspectRatio: 1,
+        crossAxisSpacing: 4,
+        mainAxisSpacing: 4,
+      ),
+      itemCount: daysInMonth + firstDayOfMonth.weekday - 1,
+      itemBuilder: (context, index) {
+        if (index < firstDayOfMonth.weekday - 1) {
+          return const SizedBox();
+        }
+
+        final day = index - firstDayOfMonth.weekday + 2;
+        final date = DateTime(selectedDate.year, selectedDate.month, day);
+        final dayShifts = _getShiftsForDate(date);
+        final hasShifts = dayShifts.isNotEmpty;
+
+        return InkWell(
+          onTap: () {
+            setState(() {
+              selectedDate = date;
+              currentView = ShiftView.daily;
+            });
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: _isToday(date)
+                  ? Theme.of(context).colorScheme.primary
+                  : hasShifts
+                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 51)
+                      : Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _isToday(date)
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).dividerColor,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '$day',
+                  style: TextStyle(
+                    fontWeight: _isToday(date) ? FontWeight.bold : FontWeight.normal,
+                    color: _isToday(date)
+                        ? Colors.white
+                        : Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                if (hasShifts)
+                  Container(
+                    margin: const EdgeInsets.only(top: 2),
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: _isToday(date) ? Colors.white : Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  List<Map<String, dynamic>> _getShiftsForDate(DateTime date) {
+    return shifts.where((shift) {
+      final shiftDate = _parseShiftDate(shift);
+      if (shiftDate != null) {
+        return _isSameDay(shiftDate, date);
+      }
+      // If no specific date, check work_days
+      final workDays = shift['work_days'];
+      if (workDays != null) {
+        final dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        final dayName = dayNames[date.weekday - 1];
+        if (workDays is List) {
+          return workDays.any((d) => d.toString().toLowerCase() == dayName);
+        } else if (workDays is String) {
+          return workDays.toLowerCase().contains(dayName);
+        }
+      }
+      return false;
+    }).toList();
+  }
+
+  DateTime? _parseShiftDate(Map<String, dynamic> shift) {
+    final dateValue = shift['date'];
+    if (dateValue == null) return null;
+    if (dateValue is DateTime) return dateValue;
+    if (dateValue is String && dateValue.isNotEmpty) {
+      try {
+        return DateTime.parse(dateValue);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
   }
   
   Widget _buildShiftCard(Map<String, dynamic> shift) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isAdmin = authProvider.isAdmin;
+
+    final employeeName = shift['employee_name']?.toString() ?? 
+                         shift['employeeName']?.toString() ?? 
+                         shift['name']?.toString() ?? 'Unknown';
+    final shiftType = shift['type']?.toString() ?? 
+                      shift['shift_name']?.toString() ?? 
+                      shift['name']?.toString() ?? 'Shift';
+    final startTime = shift['start_time']?.toString() ?? shift['startTime']?.toString() ?? '--';
+    final endTime = shift['end_time']?.toString() ?? shift['endTime']?.toString() ?? '--';
+    final color = _getShiftColor(shiftType);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: shift['color'].withValues(alpha: 128), width: 2),
+        border: Border.all(color: color.withValues(alpha: 128), width: 2),
       ),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: shift['color'],
-          child: Text(shift['employeeName'].substring(0, 1), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          backgroundColor: color,
+          child: Text(
+            employeeName.isNotEmpty ? employeeName.substring(0, 1).toUpperCase() : 'S',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
         ),
-        title: Text(shift['employeeName'], style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
-        subtitle: Text('${shift['type']} • ${shift['startTime']} - ${shift['endTime']}', style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodySmall?.color)),
-        trailing: PopupMenuButton(
-          icon: const Icon(Icons.more_vert, size: 20),
-          itemBuilder: (context) => [
-            const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Edit Shift')])),
-            const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 18, color: Colors.red), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.red))])),
-          ],
-          onSelected: (value) {
-            if (value == 'edit') _editShift(shift);
-            else if (value == 'delete') _deleteShift(shift);
-          },
+        title: Text(
+          isAdmin ? employeeName : shiftType,
+          style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface),
         ),
+        subtitle: Text(
+          isAdmin 
+              ? '$shiftType • $startTime - $endTime'
+              : '$startTime - $endTime',
+          style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodySmall?.color),
+        ),
+        trailing: isAdmin
+            ? PopupMenuButton(
+                icon: const Icon(Icons.more_vert, size: 20),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Edit Shift')])),
+                  const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 18, color: Colors.red), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.red))])),
+                ],
+                onSelected: (value) {
+                  if (value == 'edit') _editShift(shift);
+                  else if (value == 'delete') _deleteShift(shift);
+                },
+              )
+            : null,
       ),
     );
+  }
+
+  Color _getShiftColor(String shiftType) {
+    final type = shiftType.toLowerCase();
+    if (type.contains('morning')) return Colors.blue;
+    if (type.contains('evening')) return Colors.orange;
+    if (type.contains('night')) return Colors.purple;
+    if (type.contains('off') || type.contains('holiday')) return Colors.green;
+    return Theme.of(context).colorScheme.primary;
   }
   
   Widget _buildAddShiftFAB() {
@@ -428,33 +603,248 @@ class _ShiftsPageState extends State<ShiftsPage> {
   bool _isToday(DateTime date) => _isSameDay(date, DateTime.now());
   
   Future<void> _addShift() async {
-    await showDialog(
+    final nameController = TextEditingController();
+    final startTimeController = TextEditingController();
+    final endTimeController = TextEditingController();
+    String? selectedEmployeeId;
+    List<String> selectedWorkDays = [];
+    final workDayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          title: const Text('Add New Shift'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Shift Name',
+                    hintText: 'e.g., Morning Shift',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: startTimeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Start Time',
+                    hintText: '09:00',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: endTimeController,
+                  decoration: const InputDecoration(
+                    labelText: 'End Time',
+                    hintText: '17:00',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('Work Days:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: workDayOptions.map((day) {
+                    final isSelected = selectedWorkDays.contains(day);
+                    return FilterChip(
+                      label: Text(day.substring(0, 3)),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        setDialogState(() {
+                          if (selected) {
+                            selectedWorkDays.add(day);
+                          } else {
+                            selectedWorkDays.remove(day);
+                          }
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Create'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true && mounted) {
+      final response = await ApiService.createShift(
+        name: nameController.text,
+        startTime: startTimeController.text,
+        endTime: endTimeController.text,
+        workDays: selectedWorkDays,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response.success ? 'Shift created successfully!' : response.message ?? 'Failed'),
+            backgroundColor: response.success ? Colors.green : Colors.red,
+          ),
+        );
+        if (response.success) _loadShifts();
+      }
+    }
+  }
+  
+  Future<void> _editShift(Map<String, dynamic> shift) async {
+    final nameController = TextEditingController(text: shift['name']?.toString() ?? shift['shift_name']?.toString() ?? '');
+    final startTimeController = TextEditingController(text: shift['start_time']?.toString() ?? shift['startTime']?.toString() ?? '');
+    final endTimeController = TextEditingController(text: shift['end_time']?.toString() ?? shift['endTime']?.toString() ?? '');
+
+    final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Add New Shift'),
-        content: const Text('Shift creation dialog will be implemented here.'),
+        backgroundColor: Theme.of(context).cardColor,
+        title: const Text('Edit Shift'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Shift Name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: startTimeController,
+                decoration: const InputDecoration(
+                  labelText: 'Start Time',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: endTimeController,
+                decoration: const InputDecoration(
+                  labelText: 'End Time',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('Create')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
         ],
       ),
     );
+
+    if (result == true && mounted) {
+      final response = await ApiService.updateShift(
+        shiftId: shift['id'],
+        name: nameController.text,
+        startTime: startTimeController.text,
+        endTime: endTimeController.text,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response.success ? 'Shift updated!' : response.message ?? 'Failed'),
+            backgroundColor: response.success ? Colors.green : Colors.red,
+          ),
+        );
+        if (response.success) _loadShifts();
+      }
+    }
   }
   
-  void _editShift(Map<String, dynamic> shift) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Edit shift for ${shift['employeeName']}')));
+  Future<void> _deleteShift(Map<String, dynamic> shift) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Shift'),
+        content: Text('Are you sure you want to delete this shift?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      final response = await ApiService.deleteShift(shift['id']);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response.success ? 'Shift deleted!' : response.message ?? 'Failed'),
+            backgroundColor: response.success ? Colors.green : Colors.red,
+          ),
+        );
+        if (response.success) _loadShifts();
+      }
+    }
   }
   
-  void _deleteShift(Map<String, dynamic> shift) {
-    setState(() => shifts.removeWhere((s) => s['id'] == shift['id']));
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Shift deleted'), backgroundColor: Colors.red));
-  }
-  
-  void _exportSchedule() {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Exporting schedule...')));
+  Future<void> _exportSchedule() async {
+    final response = await ApiService.exportReportExcel(
+      reportType: 'shifts',
+      startDate: _getWeekStart(selectedDate).toIso8601String().split('T')[0],
+      endDate: _getWeekStart(selectedDate).add(const Duration(days: 6)).toIso8601String().split('T')[0],
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(response.success ? 'Schedule exported!' : response.message ?? 'Failed'),
+          backgroundColor: response.success ? Colors.green : Colors.red,
+        ),
+      );
+    }
   }
   
   void _openSettings() {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Shift settings')));
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        title: const Text('Shift Settings'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.access_time),
+              title: const Text('Default Shift Duration'),
+              subtitle: const Text('8 hours'),
+              onTap: () {},
+            ),
+            ListTile(
+              leading: const Icon(Icons.notification_important),
+              title: const Text('Shift Reminders'),
+              subtitle: const Text('Enabled'),
+              trailing: Switch(value: true, onChanged: (v) {}),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
   }
 }

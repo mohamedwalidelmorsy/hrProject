@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'auth_models.dart';
+import '../services/api_service.dart';
 import 'dashboard_screen.dart';
 import 'create_account_page.dart';
 
 // ═══════════════════════════════════════════════════════════════
-// Login Screen - محدّث
+// Login Screen - محدّث مع API Integration
 // ═══════════════════════════════════════════════════════════════
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,51 +19,142 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  
+
   bool _obscurePassword = true;
   bool _rememberMe = false;
   bool _isDarkMode = true;
-  
+  bool _isLoading = false;
+  String? _errorMessage;
+
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
-  
+
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
-    
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    
-    final success = await authProvider.login(
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final response = await ApiService.login(
       email: _emailController.text.trim(),
       password: _passwordController.text,
     );
-    
-    if (success && mounted) {
+
+    if (!mounted) return;
+
+    setState(() => _isLoading = false);
+
+    if (response.success) {
+      // Update AuthProvider with user data
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      if (response.data != null && response.data['user'] != null) {
+        await authProvider.setUserFromApi(response.data['user']);
+      }
+
       // Navigate to Dashboard
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const DashboardScreen(),
-        ),
-      );
-    } else if (mounted) {
-      // Show error
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+        );
+      }
+    } else {
+      setState(() => _errorMessage = response.message);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(authProvider.errorMessage ?? 'Login failed'),
+          content: Text(response.message ?? 'Login failed'),
           backgroundColor: Colors.red,
         ),
       );
     }
   }
-  
+
+  Future<void> _handleForgotPassword() async {
+    final emailController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _isDarkMode ? const Color(0xFF1A2332) : Colors.white,
+        title: Text(
+          'Reset Password',
+          style: TextStyle(color: _isDarkMode ? Colors.white : Colors.black),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Enter your email address to receive a password reset link.',
+              style: TextStyle(
+                color: _isDarkMode ? Colors.white70 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              keyboardType: TextInputType.emailAddress,
+              style: TextStyle(
+                color: _isDarkMode ? Colors.white : Colors.black,
+              ),
+              decoration: InputDecoration(
+                labelText: 'Email Address',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                filled: true,
+                fillColor: _isDarkMode
+                    ? const Color(0xFF0F1419)
+                    : Colors.grey[100],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF5B9FED),
+            ),
+            child: const Text('Send Reset Link'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && emailController.text.isNotEmpty && mounted) {
+      final response = await ApiService.forgotPassword(
+        email: emailController.text.trim(),
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              response.success
+                  ? 'Password reset link sent to your email'
+                  : response.message ?? 'Failed to send reset link',
+            ),
+            backgroundColor: response.success ? Colors.green : Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 768;
-    
+
     return Scaffold(
       backgroundColor: _isDarkMode ? const Color(0xFF0F1419) : Colors.white,
       body: SafeArea(
@@ -70,38 +162,29 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
-  
+
   Widget _buildDesktopLayout() {
     return Row(
       children: [
         // Left Panel
-        Expanded(
-          flex: 5,
-          child: _buildLeftPanel(),
-        ),
+        Expanded(flex: 5, child: _buildLeftPanel()),
         // Right Form
-        Expanded(
-          flex: 7,
-          child: _buildLoginForm(),
-        ),
+        Expanded(flex: 7, child: _buildLoginForm()),
       ],
     );
   }
-  
+
   Widget _buildMobileLayout() {
     return SingleChildScrollView(
       child: Column(
         children: [
-          SizedBox(
-            height: 200,
-            child: _buildLeftPanel(),
-          ),
+          SizedBox(height: 200, child: _buildLeftPanel()),
           _buildLoginForm(),
         ],
       ),
     );
   }
-  
+
   Widget _buildLeftPanel() {
     return Container(
       decoration: const BoxDecoration(
@@ -140,17 +223,14 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 8),
             const Text(
               'Employee Management System',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.white70,
-              ),
+              style: TextStyle(fontSize: 16, color: Colors.white70),
             ),
           ],
         ),
       ),
     );
   }
-  
+
   Widget _buildLoginForm() {
     return Container(
       padding: const EdgeInsets.all(40),
@@ -176,9 +256,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     },
                   ),
                 ),
-                
+
                 const SizedBox(height: 20),
-                
+
                 // Welcome Text
                 Text(
                   'Welcome Back! 👋',
@@ -196,62 +276,41 @@ class _LoginScreenState extends State<LoginScreen> {
                     color: _isDarkMode ? Colors.white60 : Colors.black54,
                   ),
                 ),
-                
+
                 const SizedBox(height: 40),
-                
-                // Demo Credentials Card
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF5B9FED).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: const Color(0xFF5B9FED).withOpacity(0.3),
+
+                // Error Message
+                if (_errorMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.withOpacity(0.3)),
                     ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.info_outline,
-                            color: Color(0xFF5B9FED),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Demo Credentials',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: _isDarkMode ? Colors.white : Colors.black,
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          color: Colors.red,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 13,
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Admin: admin@hrpro.com / any password',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _isDarkMode ? Colors.white70 : Colors.black54,
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Employee: employee@hrpro.com / any password',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _isDarkMode ? Colors.white70 : Colors.black54,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                
-                const SizedBox(height: 32),
-                
+                  const SizedBox(height: 20),
+                ],
+
                 // Email Field
                 TextFormField(
                   controller: _emailController,
@@ -281,9 +340,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     return null;
                   },
                 ),
-                
+
                 const SizedBox(height: 20),
-                
+
                 // Password Field
                 TextFormField(
                   controller: _passwordController,
@@ -320,9 +379,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     return null;
                   },
                 ),
-                
+
                 const SizedBox(height: 16),
-                
+
                 // Remember Me & Forgot Password
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -339,13 +398,15 @@ class _LoginScreenState extends State<LoginScreen> {
                         Text(
                           'Remember me',
                           style: TextStyle(
-                            color: _isDarkMode ? Colors.white70 : Colors.black54,
+                            color: _isDarkMode
+                                ? Colors.white70
+                                : Colors.black54,
                           ),
                         ),
                       ],
                     ),
                     TextButton(
-                      onPressed: () {},
+                      onPressed: _handleForgotPassword,
                       child: const Text(
                         'Forgot Password?',
                         style: TextStyle(
@@ -356,47 +417,43 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ],
                 ),
-                
+
                 const SizedBox(height: 24),
-                
+
                 // Sign In Button
-                Consumer<AuthProvider>(
-                  builder: (context, authProvider, child) {
-                    return SizedBox(
-                      height: 54,
-                      child: ElevatedButton(
-                        onPressed: authProvider.isLoading ? null : _handleLogin,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF5B9FED),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 0,
-                        ),
-                        child: authProvider.isLoading
-                            ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text(
-                                'Sign In',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
+                SizedBox(
+                  height: 54,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _handleLogin,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5B9FED),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    );
-                  },
+                      elevation: 0,
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text(
+                            'Sign In',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                  ),
                 ),
-                
+
                 const SizedBox(height: 16),
-                
+
                 // Create Account Button
                 SizedBox(
                   height: 54,

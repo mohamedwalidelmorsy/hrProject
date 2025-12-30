@@ -6,38 +6,36 @@ class AttendanceApprovalsPage extends StatefulWidget {
   const AttendanceApprovalsPage({super.key});
 
   @override
-  State<AttendanceApprovalsPage> createState() => _AttendanceApprovalsPageState();
+  State<AttendanceApprovalsPage> createState() =>
+      _AttendanceApprovalsPageState();
 }
 
-class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with SingleTickerProviderStateMixin {
+class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   String selectedDate = 'Today';
   String selectedDepartment = 'All';
-  
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
   }
-  
+
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    
+
     if (!authProvider.isAdmin) {
-      return Scaffold(
-        body: Center(
-          child: Text('Admin access only'),
-        ),
-      );
+      return Scaffold(body: Center(child: Text('Admin access only')));
     }
-    
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
@@ -76,10 +74,14 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
       ),
     );
   }
-  
+
   Widget _buildScrollableList(String status) {
-    final itemCount = status == 'pending' ? 15 : status == 'approved' ? 145 : 3;
-    
+    final itemCount = status == 'pending'
+        ? 15
+        : status == 'approved'
+        ? 145
+        : 3;
+
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _buildSummaryStats()),
@@ -88,7 +90,8 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
           padding: const EdgeInsets.symmetric(horizontal: 16),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate(
-              (context, index) => _buildAttendanceCard(index: index, status: status),
+              (context, index) =>
+                  _buildAttendanceCard(index: index, status: status),
               childCount: itemCount,
             ),
           ),
@@ -96,7 +99,7 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
       ],
     );
   }
-  
+
   Widget _buildSummaryStats() {
     return Container(
       margin: const EdgeInsets.all(16),
@@ -122,7 +125,7 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
       ),
     );
   }
-  
+
   Widget _buildStatItem(String number, String label, IconData icon) {
     return Column(
       children: [
@@ -136,21 +139,15 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
             color: Colors.white,
           ),
         ),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Colors.white,
-          ),
-        ),
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.white)),
       ],
     );
   }
-  
+
   Widget _buildAttendanceCard({required int index, required String status}) {
     final statusColor = _getStatusColor(status);
     final employeeName = 'Employee ${index + 1}';
-    
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -193,7 +190,10 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: statusColor,
                               borderRadius: BorderRadius.circular(12),
@@ -255,7 +255,7 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
       ),
     );
   }
-  
+
   void _showFilters() {
     showModalBottomSheet(
       context: context,
@@ -264,7 +264,10 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Filters', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Filters',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 20),
             Wrap(
               spacing: 8,
@@ -284,13 +287,17 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage> with 
       ),
     );
   }
-  
+
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'approved': return Colors.green;
-      case 'rejected': return Colors.red;
-      case 'pending': return Colors.orange;
-      default: return Colors.grey;
+      case 'approved':
+        return Colors.green;
+      case 'rejected':
+        return Colors.red;
+      case 'pending':
+        return Colors.orange;
+      default:
+        return Colors.grey;
     }
   }
 }

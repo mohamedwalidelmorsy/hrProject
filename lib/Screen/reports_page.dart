@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'auth_models.dart';
+import '../services/api_service.dart';
 
 class ReportsPage extends StatefulWidget {
   const ReportsPage({super.key});
@@ -26,6 +27,186 @@ class _ReportsPageState extends State<ReportsPage> {
     'Custom': Icons.date_range,
   };
 
+  // State Variables
+  Map<String, dynamic> adminStats = {};
+  Map<String, dynamic> employeeStats = {};
+  List<Map<String, dynamic>> weeklyAttendance = [];
+  List<Map<String, dynamic>> departmentPerformance = [];
+  List<Map<String, dynamic>> detailedReport = [];
+  List<Map<String, dynamic>> myWeeklyAttendance = [];
+  Map<String, dynamic> performanceMetrics = {};
+
+  bool isLoadingStats = true;
+  bool isLoadingCharts = true;
+  bool isLoadingReport = true;
+  bool isExporting = false;
+  String? errorMessage;
+
+  // Date range for custom period
+  DateTime startDate = DateTime.now().subtract(const Duration(days: 30));
+  DateTime endDate = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAllData();
+  }
+
+  Future<void> _loadAllData() async {
+    await Future.wait([_loadStats(), _loadChartData(), _loadDetailedReport()]);
+  }
+
+  Future<void> _loadStats() async {
+    setState(() => isLoadingStats = true);
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isAdmin = authProvider.isAdmin;
+
+    if (isAdmin) {
+      final response = await ApiService.getDashboardStats();
+      if (mounted) {
+        setState(() {
+          if (response.success && response.data != null) {
+            adminStats = response.data;
+          }
+          isLoadingStats = false;
+        });
+      }
+    } else {
+      final response = await ApiService.getMyAttendance();
+      if (mounted) {
+        setState(() {
+          if (response.success && response.data != null) {
+            employeeStats = response.data['stats'] ?? {};
+          }
+          isLoadingStats = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadChartData() async {
+    setState(() => isLoadingCharts = true);
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isAdmin = authProvider.isAdmin;
+
+    final dateRange = _getDateRange();
+
+    if (isAdmin) {
+      // Load attendance chart data
+      final attendanceResponse = await ApiService.getAttendanceReport(
+        startDate: dateRange['start']!,
+        endDate: dateRange['end']!,
+      );
+
+      // Load department performance
+      final deptResponse = await ApiService.getEmployeesReport();
+
+      if (mounted) {
+        setState(() {
+          if (attendanceResponse.success && attendanceResponse.data != null) {
+            weeklyAttendance = List<Map<String, dynamic>>.from(
+              attendanceResponse.data['weekly'] ?? [],
+            );
+          }
+          if (deptResponse.success && deptResponse.data != null) {
+            departmentPerformance = List<Map<String, dynamic>>.from(
+              deptResponse.data['departments'] ?? [],
+            );
+          }
+          isLoadingCharts = false;
+        });
+      }
+    } else {
+      // Load employee's own data
+      final response = await ApiService.getMyAttendance();
+      if (mounted) {
+        setState(() {
+          if (response.success && response.data != null) {
+            myWeeklyAttendance = List<Map<String, dynamic>>.from(
+              response.data['weekly'] ?? [],
+            );
+            performanceMetrics = response.data['performance'] ?? {};
+          }
+          isLoadingCharts = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadDetailedReport() async {
+    setState(() => isLoadingReport = true);
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isAdmin = authProvider.isAdmin;
+    final dateRange = _getDateRange();
+
+    ApiResponse response;
+    if (isAdmin) {
+      response = await ApiService.getAttendanceReport(
+        startDate: dateRange['start']!,
+        endDate: dateRange['end']!,
+      );
+    } else {
+      response = await ApiService.getMyAttendance(
+        startDate: dateRange['start'],
+        endDate: dateRange['end'],
+      );
+    }
+
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          detailedReport = List<Map<String, dynamic>>.from(
+            response.data['records'] ?? response.data['data'] ?? [],
+          );
+        }
+        isLoadingReport = false;
+      });
+    }
+  }
+
+  Map<String, String> _getDateRange() {
+    DateTime start;
+    DateTime end = DateTime.now();
+
+    switch (selectedPeriod) {
+      case 'Today':
+        start = DateTime.now();
+        break;
+      case 'This Week':
+        start = end.subtract(Duration(days: end.weekday - 1));
+        break;
+      case 'This Month':
+        start = DateTime(end.year, end.month, 1);
+        break;
+      case 'This Year':
+        start = DateTime(end.year, 1, 1);
+        break;
+      case 'Custom':
+        start = startDate;
+        end = endDate;
+        break;
+      default:
+        start = DateTime(end.year, end.month, 1);
+    }
+
+    return {
+      'start': start.toIso8601String().split('T')[0],
+      'end': end.toIso8601String().split('T')[0],
+    };
+  }
+
+  void _onPeriodChanged(String period) {
+    if (period == 'Custom') {
+      _showDateRangePicker();
+    } else {
+      setState(() => selectedPeriod = period);
+      _loadAllData();
+    }
+  }
+
   int _getCrossAxisCount(double width) {
     if (width < 600) return 2;
     if (width < 1200) return 3;
@@ -46,39 +227,48 @@ class _ReportsPageState extends State<ReportsPage> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadAllData,
+            tooltip: 'Refresh',
+          ),
+          IconButton(
             icon: const Icon(Icons.download),
             onPressed: _showExportDialog,
             tooltip: 'Export',
           ),
           IconButton(
             icon: const Icon(Icons.print),
-            onPressed: () {},
+            onPressed: () => _exportReport('print'),
             tooltip: 'Print',
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildPeriodSelector(),
-            const SizedBox(height: 24),
-            isAdmin ? _buildAdminStats() : _buildEmployeeStats(),
-            const SizedBox(height: 24),
-            Text(
-              'Analytics',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Theme.of(context).colorScheme.onSurface,
+      body: RefreshIndicator(
+        onRefresh: _loadAllData,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildPeriodSelector(),
+              const SizedBox(height: 24),
+              isAdmin ? _buildAdminStats() : _buildEmployeeStats(),
+              const SizedBox(height: 24),
+              Text(
+                'Analytics',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            isAdmin ? _buildAdminCharts() : _buildEmployeeCharts(),
-            const SizedBox(height: 24),
-            _buildDetailedReport(isAdmin),
-          ],
+              const SizedBox(height: 16),
+              isAdmin ? _buildAdminCharts() : _buildEmployeeCharts(),
+              const SizedBox(height: 24),
+              _buildDetailedReport(isAdmin),
+            ],
+          ),
         ),
       ),
     );
@@ -109,13 +299,7 @@ class _ReportsPageState extends State<ReportsPage> {
                 ),
                 label: Text(period),
                 selected: isSelected,
-                onSelected: (selected) {
-                  if (period == 'Custom') {
-                    _showDateRangePicker();
-                  } else {
-                    setState(() => selectedPeriod = period);
-                  }
-                },
+                onSelected: (selected) => _onPeriodChanged(period),
                 backgroundColor: Colors.transparent,
                 selectedColor: Theme.of(context).colorScheme.primary,
                 labelStyle: TextStyle(
@@ -133,6 +317,10 @@ class _ReportsPageState extends State<ReportsPage> {
   }
 
   Widget _buildAdminStats() {
+    if (isLoadingStats) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = _getCrossAxisCount(constraints.maxWidth);
@@ -147,34 +335,34 @@ class _ReportsPageState extends State<ReportsPage> {
           children: [
             _buildStatCard(
               icon: Icons.access_time,
-              number: '4,520',
+              number: '${adminStats['total_hours'] ?? 0}',
               label: 'Total Hours',
               color: Colors.blue,
-              trend: '+12%',
+              trend: '+${adminStats['hours_change'] ?? 0}%',
               isUp: true,
             ),
             _buildStatCard(
               icon: Icons.check_circle,
-              number: '96%',
+              number: '${adminStats['attendance_rate'] ?? 0}%',
               label: 'Attendance Rate',
               color: Colors.green,
-              trend: '+3%',
+              trend: '+${adminStats['rate_change'] ?? 0}%',
               isUp: true,
             ),
             _buildStatCard(
               icon: Icons.schedule,
-              number: '245',
+              number: '${adminStats['late_arrivals'] ?? 0}',
               label: 'Late Arrivals',
               color: Colors.orange,
-              trend: '-8%',
+              trend: '${adminStats['late_change'] ?? 0}%',
               isUp: false,
             ),
             _buildStatCard(
               icon: Icons.cancel,
-              number: '32',
+              number: '${adminStats['absent_today'] ?? 0}',
               label: 'Absences',
               color: Colors.red,
-              trend: '-5%',
+              trend: '${adminStats['absent_change'] ?? 0}%',
               isUp: false,
             ),
           ],
@@ -184,6 +372,10 @@ class _ReportsPageState extends State<ReportsPage> {
   }
 
   Widget _buildEmployeeStats() {
+    if (isLoadingStats) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = _getCrossAxisCount(constraints.maxWidth);
@@ -198,25 +390,25 @@ class _ReportsPageState extends State<ReportsPage> {
           children: [
             _buildStatCard(
               icon: Icons.calendar_today,
-              number: '22',
+              number: '${employeeStats['days_present'] ?? 0}',
               label: 'Days Present',
               color: Colors.green,
             ),
             _buildStatCard(
               icon: Icons.schedule,
-              number: '176h',
+              number: '${employeeStats['working_hours'] ?? 0}h',
               label: 'Working Hours',
               color: Colors.blue,
             ),
             _buildStatCard(
               icon: Icons.trending_up,
-              number: '96%',
+              number: '${employeeStats['attendance_rate'] ?? 0}%',
               label: 'Attendance Rate',
               color: Colors.purple,
             ),
             _buildStatCard(
               icon: Icons.beach_access,
-              number: '8',
+              number: '${employeeStats['remaining_leave'] ?? 0}',
               label: 'Remaining Leaves',
               color: Colors.orange,
             ),
@@ -292,6 +484,10 @@ class _ReportsPageState extends State<ReportsPage> {
   }
 
   Widget _buildAdminCharts() {
+    if (isLoadingCharts) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return Column(
       children: [
         _buildAttendanceChart(),
@@ -302,6 +498,10 @@ class _ReportsPageState extends State<ReportsPage> {
   }
 
   Widget _buildEmployeeCharts() {
+    if (isLoadingCharts) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return Column(
       children: [
         _buildMyAttendanceChart(),
@@ -342,18 +542,21 @@ class _ReportsPageState extends State<ReportsPage> {
           const SizedBox(height: 20),
           SizedBox(
             height: 200,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                _buildChartBar('Mon', 0.9, Colors.green),
-                _buildChartBar('Tue', 0.85, Colors.green),
-                _buildChartBar('Wed', 0.95, Colors.green),
-                _buildChartBar('Thu', 0.88, Colors.green),
-                _buildChartBar('Fri', 0.92, Colors.green),
-                _buildChartBar('Sat', 0.75, Colors.orange),
-              ],
-            ),
+            child: weeklyAttendance.isEmpty
+                ? const Center(child: Text('No data available'))
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: weeklyAttendance.map((day) {
+                      final percentage =
+                          (day['percentage'] ?? 0.0).toDouble() / 100;
+                      return _buildChartBar(
+                        day['day']?.toString() ?? '',
+                        percentage,
+                        percentage >= 0.9 ? Colors.green : Colors.orange,
+                      );
+                    }).toList(),
+                  ),
           ),
         ],
       ),
@@ -380,11 +583,24 @@ class _ReportsPageState extends State<ReportsPage> {
             ),
           ),
           const SizedBox(height: 20),
-          _buildDepartmentRow('IT', 0.95, Colors.blue),
-          _buildDepartmentRow('HR', 0.88, Colors.purple),
-          _buildDepartmentRow('Sales', 0.92, Colors.green),
-          _buildDepartmentRow('Finance', 0.85, Colors.orange),
-          _buildDepartmentRow('Marketing', 0.90, Colors.pink),
+          if (departmentPerformance.isEmpty)
+            const Center(child: Text('No data available'))
+          else
+            ...departmentPerformance.map((dept) {
+              final colors = [
+                Colors.blue,
+                Colors.purple,
+                Colors.green,
+                Colors.orange,
+                Colors.pink,
+              ];
+              final index = departmentPerformance.indexOf(dept);
+              return _buildDepartmentRow(
+                dept['name']?.toString() ?? 'Unknown',
+                (dept['attendance_rate'] ?? 0.0).toDouble() / 100,
+                colors[index % colors.length],
+              );
+            }),
         ],
       ),
     );
@@ -410,17 +626,22 @@ class _ReportsPageState extends State<ReportsPage> {
             ),
           ),
           const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildDayStatus('M', true, false),
-              _buildDayStatus('T', true, false),
-              _buildDayStatus('W', false, false),
-              _buildDayStatus('T', true, true),
-              _buildDayStatus('F', true, false),
-              _buildDayStatus('S', false, true),
-            ],
-          ),
+          if (myWeeklyAttendance.isEmpty)
+            const Center(child: Text('No data available'))
+          else
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: myWeeklyAttendance.map((day) {
+                final status = day['status']?.toString() ?? 'absent';
+                final isPresent = status == 'present';
+                final isLate = status == 'late';
+                return _buildDayStatus(
+                  day['day']?.toString().substring(0, 1) ?? '',
+                  isPresent || isLate,
+                  isLate,
+                );
+              }).toList(),
+            ),
         ],
       ),
     );
@@ -446,9 +667,21 @@ class _ReportsPageState extends State<ReportsPage> {
             ),
           ),
           const SizedBox(height: 20),
-          _buildProgressRow('Punctuality', 0.96, Colors.green),
-          _buildProgressRow('Attendance', 0.92, Colors.blue),
-          _buildProgressRow('Task Completion', 0.88, Colors.purple),
+          _buildProgressRow(
+            'Punctuality',
+            (performanceMetrics['punctuality'] ?? 0.0).toDouble() / 100,
+            Colors.green,
+          ),
+          _buildProgressRow(
+            'Attendance',
+            (performanceMetrics['attendance'] ?? 0.0).toDouble() / 100,
+            Colors.blue,
+          ),
+          _buildProgressRow(
+            'Task Completion',
+            (performanceMetrics['task_completion'] ?? 0.0).toDouble() / 100,
+            Colors.purple,
+          ),
         ],
       ),
     );
@@ -632,31 +865,47 @@ class _ReportsPageState extends State<ReportsPage> {
           ],
         ),
         const SizedBox(height: 16),
-        Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: Theme.of(context).dividerColor,
-              width: 1.5,
+        if (isLoadingReport)
+          const Center(child: CircularProgressIndicator())
+        else if (detailedReport.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: const Center(child: Text('No records found')),
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Theme.of(context).dividerColor,
+                width: 1.5,
+              ),
+            ),
+            child: Column(
+              children: [
+                _buildReportHeader(),
+                ...detailedReport.take(10).map((record) {
+                  return _buildReportRow(
+                    record['employee_name']?.toString() ??
+                        record['name']?.toString() ??
+                        'Unknown',
+                    record['employee_id']?.toString() ??
+                        record['date']?.toString() ??
+                        '',
+                    record['check_in']?.toString() ?? 'N/A',
+                    record['check_out']?.toString() ?? 'N/A',
+                    record['total_hours']?.toString() ?? 'N/A',
+                  );
+                }),
+              ],
             ),
           ),
-          child: Column(
-            children: [
-              _buildReportHeader(),
-              ...List.generate(
-                5,
-                (index) => _buildReportRow(
-                  isAdmin ? 'Employee ${index + 1}' : 'Day ${index + 1}',
-                  isAdmin ? 'EMP00${index + 1}' : 'Dec ${index + 20}',
-                  '8:30 AM',
-                  '5:00 PM',
-                  '8h 30m',
-                ),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -793,6 +1042,7 @@ class _ReportsPageState extends State<ReportsPage> {
       context: context,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
+      initialDateRange: DateTimeRange(start: startDate, end: endDate),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -808,7 +1058,10 @@ class _ReportsPageState extends State<ReportsPage> {
     if (picked != null) {
       setState(() {
         selectedPeriod = 'Custom';
+        startDate = picked.start;
+        endDate = picked.end;
       });
+      _loadAllData();
     }
   }
 
@@ -834,9 +1087,7 @@ class _ReportsPageState extends State<ReportsPage> {
               ),
               onTap: () {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Exporting as PDF...')),
-                );
+                _exportReport('pdf');
               },
             ),
             ListTile(
@@ -849,9 +1100,7 @@ class _ReportsPageState extends State<ReportsPage> {
               ),
               onTap: () {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Exporting as Excel...')),
-                );
+                _exportReport('excel');
               },
             ),
             ListTile(
@@ -864,14 +1113,93 @@ class _ReportsPageState extends State<ReportsPage> {
               ),
               onTap: () {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Sending email...')),
-                );
+                _sendReportEmail();
               },
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _exportReport(String format) async {
+    setState(() => isExporting = true);
+
+    final dateRange = _getDateRange();
+    ApiResponse response;
+
+    if (format == 'pdf') {
+      response = await ApiService.exportReportPdf(
+        reportType: 'attendance',
+        startDate: dateRange['start']!,
+        endDate: dateRange['end']!,
+      );
+    } else if (format == 'excel') {
+      response = await ApiService.exportReportExcel(
+        reportType: 'attendance',
+        startDate: dateRange['start']!,
+        endDate: dateRange['end']!,
+      );
+    } else {
+      // Print
+      response = await ApiService.exportReportPdf(
+        reportType: 'attendance',
+        startDate: dateRange['start']!,
+        endDate: dateRange['end']!,
+      );
+    }
+
+    if (mounted) {
+      setState(() => isExporting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            response.success
+                ? 'Report exported successfully!'
+                : response.message ?? 'Failed to export report',
+          ),
+          backgroundColor: response.success ? Colors.green : Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _sendReportEmail() async {
+    final emailController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        title: const Text('Send Report'),
+        content: TextField(
+          controller: emailController,
+          decoration: const InputDecoration(
+            labelText: 'Email Address',
+            hintText: 'admin@company.com',
+          ),
+          keyboardType: TextInputType.emailAddress,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && emailController.text.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Report sent successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 }

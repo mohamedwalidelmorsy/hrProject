@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'auth_models.dart';
+import '../services/api_service.dart';
 import 'package:hr_pro_app/theme_provider.dart';
 import 'login_screen_updated.dart';
 
 // ═══════════════════════════════════════════════════════════════
-// Profile Page - مشترك للأدمن والموظف
+// Profile Page - مشترك للأدمن والموظف مع API Integration
 // ═══════════════════════════════════════════════════════════════
 
 class ProfilePage extends StatefulWidget {
@@ -17,14 +18,20 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   bool isEditMode = false;
+  bool isLoading = true;
+  bool isSaving = false;
 
   // Controllers
-  final _nameController = TextEditingController(text: 'Ahmed Mohamed');
-  final _emailController = TextEditingController(text: 'ahmed@company.com');
-  final _phoneController = TextEditingController(text: '+966 50 123 4567');
-  final _addressController = TextEditingController(
-    text: 'Riyadh, Saudi Arabia',
-  );
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _addressController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
 
   @override
   void dispose() {
@@ -33,6 +40,37 @@ class _ProfilePageState extends State<ProfilePage> {
     _phoneController.dispose();
     _addressController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadUserData() async {
+    setState(() => isLoading = true);
+
+    // First, get data from AuthProvider
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final user = authProvider.currentUser;
+
+    if (user != null) {
+      _nameController.text = user.name;
+      _emailController.text = user.email;
+      _phoneController.text = user.phone ?? '';
+    }
+
+    // Then try to get fresh data from API
+    final response = await ApiService.getCurrentUser();
+
+    if (mounted) {
+      if (response.success && response.data != null) {
+        final userData = response.data['user'] ?? response.data;
+        _nameController.text =
+            userData['name']?.toString() ?? _nameController.text;
+        _emailController.text =
+            userData['email']?.toString() ?? _emailController.text;
+        _phoneController.text =
+            userData['phone']?.toString() ?? _phoneController.text;
+        _addressController.text = userData['address']?.toString() ?? '';
+      }
+      setState(() => isLoading = false);
+    }
   }
 
   @override
@@ -58,55 +96,64 @@ class _ProfilePageState extends State<ProfilePage> {
             )
           else
             TextButton(
-              onPressed: () {
-                setState(() => isEditMode = false);
-                _saveProfile();
-              },
-              child: const Text(
-                'Save',
-                style: TextStyle(
-                  color: Color(0xFF5B9FED),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              onPressed: isSaving ? null : () => _saveProfile(authProvider),
+              child: isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text(
+                      'Save',
+                      style: TextStyle(
+                        color: Color(0xFF5B9FED),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
             ),
         ],
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // Profile Header
-            _buildProfileHeader(user),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadUserData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  children: [
+                    // Profile Header
+                    _buildProfileHeader(user),
 
-            const SizedBox(height: 24),
+                    const SizedBox(height: 24),
 
-            // Profile Information
-            _buildProfileInfo(),
+                    // Profile Information
+                    _buildProfileInfo(),
 
-            const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-            // Change Password Section
-            _buildChangePasswordSection(),
+                    // Change Password Section
+                    _buildChangePasswordSection(authProvider),
 
-            const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-            // Settings Section
-            _buildSettingsSection(),
+                    // Settings Section
+                    _buildSettingsSection(),
 
-            const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-            // Admin Settings (Admin only)
-            if (isAdmin) _buildAdminSettings(),
+                    // Admin Settings (Admin only)
+                    if (isAdmin) _buildAdminSettings(),
 
-            const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-            // Logout Button
-            _buildLogoutButton(authProvider),
+                    // Logout Button
+                    _buildLogoutButton(authProvider),
 
-            const SizedBox(height: 40),
-          ],
-        ),
-      ),
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 
@@ -130,14 +177,20 @@ class _ProfilePageState extends State<ProfilePage> {
               CircleAvatar(
                 radius: 60,
                 backgroundColor: Colors.white.withValues(alpha: 77),
-                child: Text(
-                  user?.initials ?? 'AM',
-                  style: TextStyle(
-                    fontSize: 40,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                ),
+                backgroundImage:
+                    user?.avatarUrl != null && user!.avatarUrl!.isNotEmpty
+                    ? NetworkImage(user.avatarUrl!)
+                    : null,
+                child: user?.avatarUrl == null || user!.avatarUrl!.isEmpty
+                    ? Text(
+                        user?.initials ?? 'U',
+                        style: TextStyle(
+                          fontSize: 40,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      )
+                    : null,
               ),
               Positioned(
                 bottom: 0,
@@ -150,7 +203,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       color: Theme.of(context).colorScheme.primary,
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.camera_alt,
                       color: Colors.white,
                       size: 20,
@@ -162,8 +215,8 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const SizedBox(height: 16),
           Text(
-            user?.name ?? 'User Name',
-            style: TextStyle(
+            user?.name ?? _nameController.text,
+            style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
               color: Colors.white,
@@ -178,7 +231,7 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
             child: Text(
               user?.isAdmin == true ? 'Administrator' : 'Employee',
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 14,
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
@@ -189,6 +242,16 @@ class _ProfilePageState extends State<ProfilePage> {
             const SizedBox(height: 8),
             Text(
               'ID: ${user?.employeeId}',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.white.withValues(alpha: 204),
+              ),
+            ),
+          ],
+          if (user?.department != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              user!.department!,
               style: TextStyle(
                 fontSize: 13,
                 color: Colors.white.withValues(alpha: 204),
@@ -319,7 +382,7 @@ class _ProfilePageState extends State<ProfilePage> {
   // ═══════════════════════════════════════════════════════════════
   // Change Password Section
   // ═══════════════════════════════════════════════════════════════
-  Widget _buildChangePasswordSection() {
+  Widget _buildChangePasswordSection(AuthProvider authProvider) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
@@ -353,7 +416,7 @@ class _ProfilePageState extends State<ProfilePage> {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: _showChangePasswordDialog,
+              onPressed: () => _showChangePasswordDialog(authProvider),
               icon: const Icon(Icons.vpn_key),
               label: const Text('Change Password'),
               style: OutlinedButton.styleFrom(
@@ -552,7 +615,7 @@ class _ProfilePageState extends State<ProfilePage> {
           _buildSettingTile(
             icon: Icons.backup,
             title: 'Backup & Restore',
-            subtitle: 'Last backup: 2 days ago',
+            subtitle: 'Manage data backups',
             trailing: const Icon(
               Icons.arrow_forward_ios,
               size: 16,
@@ -603,15 +666,34 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Helper Functions
+  // Helper Functions with API
   // ═══════════════════════════════════════════════════════════════
-  void _saveProfile() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Profile updated successfully!'),
-        backgroundColor: Color(0xFF5B9FED),
-      ),
+  Future<void> _saveProfile(AuthProvider authProvider) async {
+    setState(() => isSaving = true);
+
+    final success = await authProvider.updateProfile(
+      name: _nameController.text,
+      email: _emailController.text,
+      phone: _phoneController.text,
     );
+
+    if (mounted) {
+      setState(() {
+        isSaving = false;
+        if (success) isEditMode = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? 'Profile updated successfully!'
+                : authProvider.errorMessage ?? 'Failed to update profile',
+          ),
+          backgroundColor: success ? const Color(0xFF5B9FED) : Colors.red,
+        ),
+      );
+    }
   }
 
   void _changeProfilePicture() {
@@ -689,92 +771,152 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  void _showChangePasswordDialog() {
+  void _showChangePasswordDialog(AuthProvider authProvider) {
     final oldPasswordController = TextEditingController();
     final newPasswordController = TextEditingController();
     final confirmPasswordController = TextEditingController();
+    bool isChanging = false;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        title: Text(
-          'Change Password',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: oldPasswordController,
-              obscureText: true,
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-              decoration: InputDecoration(
-                labelText: 'Current Password',
-                labelStyle: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          title: Text(
+            'Change Password',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: oldPasswordController,
+                obscureText: true,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
-                prefixIcon: Icon(
-                  Icons.lock_outline,
-                  color: Theme.of(context).colorScheme.primary,
+                decoration: InputDecoration(
+                  labelText: 'Current Password',
+                  labelStyle: TextStyle(
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                  prefixIcon: Icon(
+                    Icons.lock_outline,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                 ),
               ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: newPasswordController,
+                obscureText: true,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'New Password',
+                  labelStyle: TextStyle(
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                  prefixIcon: Icon(
+                    Icons.lock_outline,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: confirmPasswordController,
+                obscureText: true,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'Confirm Password',
+                  labelStyle: TextStyle(
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                  prefixIcon: Icon(
+                    Icons.lock_outline,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isChanging ? null : () => Navigator.pop(context),
+              child: const Text('Cancel'),
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: newPasswordController,
-              obscureText: true,
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-              decoration: InputDecoration(
-                labelText: 'New Password',
-                labelStyle: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                ),
-                prefixIcon: Icon(
-                  Icons.lock_outline,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
+            ElevatedButton(
+              onPressed: isChanging
+                  ? null
+                  : () async {
+                      if (newPasswordController.text !=
+                          confirmPasswordController.text) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Passwords do not match'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (newPasswordController.text.length < 6) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Password must be at least 6 characters',
+                            ),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      setDialogState(() => isChanging = true);
+
+                      final success = await authProvider.changePassword(
+                        currentPassword: oldPasswordController.text,
+                        newPassword: newPasswordController.text,
+                        confirmPassword: confirmPasswordController.text,
+                      );
+
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              success
+                                  ? 'Password changed successfully!'
+                                  : authProvider.errorMessage ??
+                                        'Failed to change password',
+                            ),
+                            backgroundColor: success
+                                ? const Color(0xFF5B9FED)
+                                : Colors.red,
+                          ),
+                        );
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
               ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: confirmPasswordController,
-              obscureText: true,
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-              decoration: InputDecoration(
-                labelText: 'Confirm Password',
-                labelStyle: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                ),
-                prefixIcon: Icon(
-                  Icons.lock_outline,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ),
+              child: isChanging
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Change'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Password changed successfully!'),
-                  backgroundColor: Color(0xFF5B9FED),
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-            ),
-            child: const Text('Change'),
-          ),
-        ],
       ),
     );
   }

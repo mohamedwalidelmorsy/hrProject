@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'auth_models.dart';
 import '../theme_provider.dart';
+import '../services/api_service.dart';
 import 'attendance_screen.dart';
 import 'attendance_approvals_page.dart';
 import 'employees_page.dart';
@@ -12,7 +13,7 @@ import 'shifts_page.dart';
 import 'login_screen_updated.dart';
 
 // ═══════════════════════════════════════════════════════════════
-// Dashboard Screen - محسّن مع Theme Support
+// Dashboard Screen - محسّن مع Theme Support و API Integration
 // ═══════════════════════════════════════════════════════════════
 
 class DashboardScreen extends StatefulWidget {
@@ -23,6 +24,150 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  // ═══════════════════════════════════════════════════════════════
+  // State Variables
+  // ═══════════════════════════════════════════════════════════════
+
+  // Dashboard Stats
+  Map<String, dynamic> dashboardStats = {};
+  bool isLoadingStats = true;
+
+  // Weekly Attendance Data
+  List<Map<String, dynamic>> weeklyAttendance = [];
+  bool isLoadingWeekly = true;
+
+  // Attendance Approvals
+  Map<String, dynamic> approvalsData = {};
+  List<dynamic> recentApprovals = [];
+  bool isLoadingApprovals = true;
+
+  // Working Today
+  List<dynamic> workingToday = [];
+  bool isLoadingWorking = true;
+
+  // Employee Info (for employee view)
+  Map<String, dynamic> employeeInfo = {};
+  Map<String, dynamic> employeeStats = {};
+  bool isLoadingEmployeeInfo = true;
+
+  // ═══════════════════════════════════════════════════════════════
+  // Lifecycle Methods
+  // ═══════════════════════════════════════════════════════════════
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboardData();
+  }
+
+  Future<void> _loadDashboardData() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isAdmin = authProvider.isAdmin;
+
+    if (isAdmin) {
+      await Future.wait([
+        _loadDashboardStats(),
+        _loadWeeklyAttendance(),
+        _loadAttendanceApprovals(),
+        _loadWorkingToday(),
+      ]);
+    } else {
+      await Future.wait([_loadEmployeeStats(), _loadEmployeeInfo()]);
+    }
+  }
+
+  Future<void> _loadDashboardStats() async {
+    final response = await ApiService.getDashboardStats();
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          dashboardStats = response.data;
+        }
+        isLoadingStats = false;
+      });
+    }
+  }
+
+  Future<void> _loadWeeklyAttendance() async {
+    final response = await ApiService.getAttendanceReport(
+      startDate: DateTime.now()
+          .subtract(const Duration(days: 7))
+          .toIso8601String()
+          .split('T')[0],
+      endDate: DateTime.now().toIso8601String().split('T')[0],
+    );
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          weeklyAttendance = List<Map<String, dynamic>>.from(
+            response.data['weekly'] ?? [],
+          );
+        }
+        isLoadingWeekly = false;
+      });
+    }
+  }
+
+  Future<void> _loadAttendanceApprovals() async {
+    final response = await ApiService.getAllAttendance(page: 1);
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          approvalsData = {
+            'pending': response.data['pending_count'] ?? 0,
+            'approved': response.data['approved_count'] ?? 0,
+            'rejected': response.data['rejected_count'] ?? 0,
+          };
+          recentApprovals = response.data['recent'] ?? [];
+        }
+        isLoadingApprovals = false;
+      });
+    }
+  }
+
+  Future<void> _loadWorkingToday() async {
+    final response = await ApiService.getAllAttendance(
+      startDate: DateTime.now().toIso8601String().split('T')[0],
+      endDate: DateTime.now().toIso8601String().split('T')[0],
+    );
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          workingToday = response.data['data'] ?? [];
+        }
+        isLoadingWorking = false;
+      });
+    }
+  }
+
+  Future<void> _loadEmployeeStats() async {
+    final response = await ApiService.getMyAttendance();
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          employeeStats = response.data['stats'] ?? {};
+        }
+        isLoadingStats = false;
+      });
+    }
+  }
+
+  Future<void> _loadEmployeeInfo() async {
+    final response = await ApiService.getTodayAttendanceStatus();
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          employeeInfo = response.data;
+        }
+        isLoadingEmployeeInfo = false;
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Build Method
+  // ═══════════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
@@ -34,42 +179,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: _buildAppBar(userName, !isWideScreen),
-      drawer: !isWideScreen ? _buildDrawer(isAdmin, authProvider, userName) : null,
-      body: Row(
-        children: [
-          if (isWideScreen)
-            SizedBox(
-              width: 260,
-              child: _buildPersistentDrawer(isAdmin, authProvider, userName),
-            ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildWelcomeCard(userName, isAdmin),
-                  const SizedBox(height: 24),
-                  if (isAdmin) ...[
-                    _buildAdminStats(),
+      drawer: !isWideScreen
+          ? _buildDrawer(isAdmin, authProvider, userName)
+          : null,
+      body: RefreshIndicator(
+        onRefresh: _loadDashboardData,
+        child: Row(
+          children: [
+            if (isWideScreen)
+              SizedBox(
+                width: 260,
+                child: _buildPersistentDrawer(isAdmin, authProvider, userName),
+              ),
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildWelcomeCard(userName, isAdmin),
                     const SizedBox(height: 24),
-                    _buildAdminCharts(),
-                    const SizedBox(height: 24),
-                    _buildAttendanceApprovalsCard(),
-                  ] else ...[
-                    _buildEmployeeQuickActions(),
-                    const SizedBox(height: 24),
-                    _buildEmployeeStats(),
-                    const SizedBox(height: 24),
-                    _buildEmployeeInfoCard(),
+                    if (isAdmin) ...[
+                      _buildAdminStats(),
+                      const SizedBox(height: 24),
+                      _buildAdminCharts(),
+                      const SizedBox(height: 24),
+                      _buildAttendanceApprovalsCard(),
+                      const SizedBox(height: 24),
+                      _buildShiftCoverCard(),
+                    ] else ...[
+                      _buildEmployeeQuickActions(),
+                      const SizedBox(height: 24),
+                      _buildEmployeeStats(),
+                      const SizedBox(height: 24),
+                      _buildEmployeeInfoCard(),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-      floatingActionButton: isAdmin ? _buildAdminFAB() : null,
+      floatingActionButton: null,
     );
   }
 
@@ -144,7 +297,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildPersistentDrawer(bool isAdmin, AuthProvider authProvider, String userName) {
+  Widget _buildPersistentDrawer(
+    bool isAdmin,
+    AuthProvider authProvider,
+    String userName,
+  ) {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
@@ -215,7 +372,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     title: 'Attendance Approvals',
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const AttendanceApprovalsPage()),
+                      MaterialPageRoute(
+                        builder: (_) => const AttendanceApprovalsPage(),
+                      ),
                     ),
                   ),
                 if (isAdmin)
@@ -281,7 +440,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildDrawer(bool isAdmin, AuthProvider authProvider, String userName) {
+  Widget _buildDrawer(
+    bool isAdmin,
+    AuthProvider authProvider,
+    String userName,
+  ) {
     return Drawer(
       backgroundColor: Theme.of(context).cardColor,
       child: _buildPersistentDrawer(isAdmin, authProvider, userName),
@@ -301,8 +464,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         color: isLogout
             ? Colors.red
             : isActive
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).iconTheme.color,
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).iconTheme.color,
       ),
       title: Text(
         title,
@@ -310,13 +473,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           color: isLogout
               ? Colors.red
               : isActive
-                  ? Theme.of(context).colorScheme.primary
-                  : Theme.of(context).colorScheme.onSurface,
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.onSurface,
           fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
         ),
       ),
       selected: isActive,
-      selectedTileColor: Theme.of(context).colorScheme.primary.withValues(alpha: 26),
+      selectedTileColor: Theme.of(
+        context,
+      ).colorScheme.primary.withValues(alpha: 26),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       onTap: onTap,
@@ -327,7 +492,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final hour = DateTime.now().hour;
     String greeting;
     String emoji;
-    
+
     if (hour < 12) {
       greeting = 'Good Morning';
       emoji = '👋';
@@ -338,7 +503,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       greeting = 'Good Evening';
       emoji = '🌙';
     }
-    
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(32),
@@ -373,13 +538,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            isAdmin 
-                ? 'Ready to manage your team effectively?' 
+            isAdmin
+                ? 'Ready to manage your team effectively?'
                 : 'Ready to make today productive?',
-            style: const TextStyle(
-              fontSize: 16,
-              color: Colors.white,
-            ),
+            style: const TextStyle(fontSize: 16, color: Colors.white),
           ),
         ],
       ),
@@ -387,44 +549,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildAdminStats() {
+    if (isLoadingStats) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
-        
+        int crossAxisCount;
+        double childAspectRatio;
+
+        if (constraints.maxWidth < 400) {
+          crossAxisCount = 2;
+          childAspectRatio = 1.0;
+        } else if (constraints.maxWidth < 600) {
+          crossAxisCount = 2;
+          childAspectRatio = 1.15;
+        } else if (constraints.maxWidth < 900) {
+          crossAxisCount = 2;
+          childAspectRatio = 1.3;
+        } else if (constraints.maxWidth < 1200) {
+          crossAxisCount = 4;
+          childAspectRatio = 1.25;
+        } else {
+          crossAxisCount = 4;
+          childAspectRatio = 1.35;
+        }
+
         return GridView.count(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: crossAxisCount,
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 16,
-          childAspectRatio: 1.3,
+          mainAxisSpacing: constraints.maxWidth < 600 ? 12 : 16,
+          crossAxisSpacing: constraints.maxWidth < 600 ? 12 : 16,
+          childAspectRatio: childAspectRatio,
           children: [
             _buildStatCard(
               icon: Icons.people,
-              number: '150',
+              number: '${dashboardStats['total_employees'] ?? 0}',
               label: 'Total Employees',
-              trend: '+12',
+              trend: '+${dashboardStats['new_employees_this_month'] ?? 0}',
               color: Theme.of(context).colorScheme.primary,
             ),
             _buildStatCard(
               icon: Icons.check_circle,
-              number: '145',
+              number: '${dashboardStats['present_today'] ?? 0}',
               label: 'Present Today',
-              trend: '+3',
+              trend: '+${dashboardStats['present_change'] ?? 0}',
               color: Colors.green,
             ),
             _buildStatCard(
               icon: Icons.cancel,
-              number: '5',
+              number: '${dashboardStats['absent_today'] ?? 0}',
               label: 'Absent',
-              trend: '-2',
+              trend: '${dashboardStats['absent_change'] ?? 0}',
               color: Colors.red,
             ),
             _buildStatCard(
               icon: Icons.schedule,
-              number: '12',
+              number: '${dashboardStats['late_arrivals'] ?? 0}',
               label: 'Late Arrivals',
-              trend: '-1',
+              trend: '${dashboardStats['late_change'] ?? 0}',
               color: Colors.orange,
             ),
           ],
@@ -442,57 +626,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }) {
     final isPositive = !trend.startsWith('-');
     final trendColor = isPositive ? Colors.green : Colors.red;
-    
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).dividerColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isSmallCard = constraints.maxWidth < 160;
+
+        return Container(
+          padding: EdgeInsets.all(isSmallCard ? 12 : 16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Theme.of(context).dividerColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, color: color, size: 28),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: trendColor,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  trend,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Icon(icon, color: color, size: isSmallCard ? 22 : 28),
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isSmallCard ? 6 : 8,
+                      vertical: isSmallCard ? 3 : 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: trendColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      trend,
+                      style: TextStyle(
+                        fontSize: isSmallCard ? 9 : 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
+                ],
+              ),
+              const Spacer(),
+              Text(
+                number,
+                style: TextStyle(
+                  fontSize: isSmallCard ? 28 : 36,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
+              ),
+              SizedBox(height: isSmallCard ? 2 : 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: isSmallCard ? 11 : 13,
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
-          const Spacer(),
-          Text(
-            number,
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              color: color,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).textTheme.bodySmall?.color,
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -508,71 +703,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Attendance Overview',
+            'Weekly Attendance Overview',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
               color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
           SizedBox(
             height: 200,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                _buildChartBar('Mon', 0.9),
-                _buildChartBar('Tue', 0.85),
-                _buildChartBar('Wed', 0.95),
-                _buildChartBar('Thu', 0.88),
-                _buildChartBar('Fri', 0.92),
-                _buildChartBar('Sat', 0.75),
-              ],
-            ),
+            child: isLoadingWeekly
+                ? const Center(child: CircularProgressIndicator())
+                : weeklyAttendance.isEmpty
+                ? const Center(child: Text('No data available'))
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: weeklyAttendance.map((day) {
+                      return _buildSimpleBar(
+                        day['day'] ?? '',
+                        (day['percentage'] ?? 0.0).toDouble() / 100,
+                      );
+                    }).toList(),
+                  ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildChartBar(String label, double height) {
+  Widget _buildSimpleBar(String day, double value) {
     return Expanded(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Text(
-            '${(height * 100).toInt()}%',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).textTheme.bodySmall?.color,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            height: 150 * height,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primary,
-                  Theme.of(context).colorScheme.secondary,
-                ],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Container(
+              height: 160 * value,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(6),
+                ),
               ),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).textTheme.bodySmall?.color,
+            const SizedBox(height: 8),
+            Text(
+              day,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -581,7 +768,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
-        
+
         return GridView.count(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -594,7 +781,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
               icon: Icons.login,
               title: 'Check In',
               color: Colors.green,
-              onTap: () {},
+              onTap: () async {
+                final response = await ApiService.checkIn();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        response.success
+                            ? 'Checked in successfully!'
+                            : response.message ?? 'Failed',
+                      ),
+                      backgroundColor: response.success
+                          ? Colors.green
+                          : Colors.red,
+                    ),
+                  );
+                  if (response.success) _loadDashboardData();
+                }
+              },
             ),
             _buildActionCard(
               icon: Icons.calendar_today,
@@ -675,10 +879,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildEmployeeStats() {
+    if (isLoadingStats) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
-        
+
         return GridView.count(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -689,30 +897,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             _buildStatCard(
               icon: Icons.check_circle,
-              number: '22',
+              number: '${employeeStats['days_present'] ?? 0}',
               label: 'Days Present',
-              trend: '+2',
+              trend: '+${employeeStats['present_change'] ?? 0}',
               color: Colors.green,
             ),
             _buildStatCard(
               icon: Icons.schedule,
-              number: '176h',
+              number: '${employeeStats['working_hours'] ?? 0}h',
               label: 'Working Hours',
-              trend: '+8h',
+              trend: '+${employeeStats['hours_change'] ?? 0}h',
               color: Theme.of(context).colorScheme.primary,
             ),
             _buildStatCard(
               icon: Icons.percent,
-              number: '96%',
+              number: '${employeeStats['attendance_rate'] ?? 0}%',
               label: 'Attendance Rate',
-              trend: '+3%',
+              trend: '+${employeeStats['rate_change'] ?? 0}%',
               color: Colors.purple,
             ),
             _buildStatCard(
               icon: Icons.beach_access,
-              number: '8',
+              number: '${employeeStats['remaining_leave'] ?? 0}',
               label: 'Remaining Leave',
-              trend: '-1',
+              trend: '${employeeStats['leave_change'] ?? 0}',
               color: Colors.orange,
             ),
           ],
@@ -722,6 +930,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildEmployeeInfoCard() {
+    if (isLoadingEmployeeInfo) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -741,10 +953,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          _buildInfoRow(Icons.work, 'Current Shift', 'Morning Shift'),
-          _buildInfoRow(Icons.schedule, 'Working Hours', '08:00 AM - 04:00 PM'),
-          _buildInfoRow(Icons.location_on, 'Status', 'On Duty'),
-          _buildInfoRow(Icons.access_time, 'Last Check-in', '08:15 AM'),
+          _buildInfoRow(
+            Icons.work,
+            'Current Shift',
+            employeeInfo['shift_name'] ?? 'N/A',
+          ),
+          _buildInfoRow(
+            Icons.schedule,
+            'Working Hours',
+            employeeInfo['working_hours'] ?? 'N/A',
+          ),
+          _buildInfoRow(
+            Icons.location_on,
+            'Status',
+            employeeInfo['status'] ?? 'N/A',
+          ),
+          _buildInfoRow(
+            Icons.access_time,
+            'Last Check-in',
+            employeeInfo['check_in_time'] ?? 'N/A',
+          ),
         ],
       ),
     );
@@ -776,15 +1004,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildAdminFAB() {
-    return FloatingActionButton.extended(
-      onPressed: () {},
-      backgroundColor: Theme.of(context).colorScheme.primary,
-      icon: const Icon(Icons.person_add),
-      label: const Text('Add Employee'),
     );
   }
 
@@ -845,40 +1064,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          
-          // Stats Row
-          Row(
-            children: [
-              Expanded(
-                child: _buildApprovalStat(
-                  '15',
-                  'Pending',
-                  Icons.schedule,
-                  Colors.orange,
+
+          if (isLoadingApprovals)
+            const Center(child: CircularProgressIndicator())
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: _buildApprovalStat(
+                    '${approvalsData['pending'] ?? 0}',
+                    'Pending',
+                    Icons.schedule,
+                    Colors.orange,
+                  ),
                 ),
-              ),
-              Expanded(
-                child: _buildApprovalStat(
-                  '145',
-                  'Approved',
-                  Icons.check_circle,
-                  Colors.green,
+                Expanded(
+                  child: _buildApprovalStat(
+                    '${approvalsData['approved'] ?? 0}',
+                    'Approved',
+                    Icons.check_circle,
+                    Colors.green,
+                  ),
                 ),
-              ),
-              Expanded(
-                child: _buildApprovalStat(
-                  '3',
-                  'Rejected',
-                  Icons.cancel,
-                  Colors.red,
+                Expanded(
+                  child: _buildApprovalStat(
+                    '${approvalsData['rejected'] ?? 0}',
+                    'Rejected',
+                    Icons.cancel,
+                    Colors.red,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          
+              ],
+            ),
+
           const SizedBox(height: 20),
-          
-          // Recent Requests Preview
+
           Text(
             'Recent Requests',
             style: TextStyle(
@@ -888,83 +1108,96 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          
-          ...List.generate(3, (index) {
-            return Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).scaffoldBackgroundColor,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Theme.of(context).dividerColor),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    child: Text(
-                      'E${index + 1}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+
+          if (isLoadingApprovals)
+            const Center(child: CircularProgressIndicator())
+          else if (recentApprovals.isEmpty)
+            const Text('No recent requests')
+          else
+            ...recentApprovals.take(3).map((approval) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      child: Text(
+                        (approval['employee_name'] ?? 'U')
+                            .substring(0, 1)
+                            .toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Employee ${index + 1}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            approval['employee_name'] ?? 'Unknown',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
                           ),
-                        ),
-                        Text(
-                          '08:15 AM - 04:30 PM',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Theme.of(context).textTheme.bodySmall?.color,
+                          Text(
+                            '${approval['check_in'] ?? ''} - ${approval['check_out'] ?? ''}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(
+                                context,
+                              ).textTheme.bodySmall?.color,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.orange,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text(
-                      'PENDING',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        ],
                       ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          }),
-          
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _getStatusColor(approval['status']),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        (approval['status'] ?? 'PENDING').toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+
           const SizedBox(height: 16),
-          
-          // View All Button
+
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const AttendanceApprovalsPage()),
+                  MaterialPageRoute(
+                    builder: (_) => const AttendanceApprovalsPage(),
+                  ),
                 );
               },
               style: OutlinedButton.styleFrom(
@@ -985,25 +1218,192 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildApprovalStat(String number, String label, IconData icon, Color color) {
+  Color _getStatusColor(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'approved':
+        return Colors.green;
+      case 'rejected':
+        return Colors.red;
+      case 'pending':
+      default:
+        return Colors.orange;
+    }
+  }
+
+  Widget _buildShiftCoverCard() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Colors.purple, Colors.deepPurple],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.swap_horiz,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Today\'s Working Employees',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Employees scheduled to work today',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).textTheme.bodySmall?.color,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          Text(
+            'Working Today',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          if (isLoadingWorking)
+            const Center(child: CircularProgressIndicator())
+          else if (workingToday.isEmpty)
+            const Text('No employees working today')
+          else
+            ...workingToday.take(5).map((employee) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.purple,
+                      child: Text(
+                        (employee['employee_name'] ?? 'U')
+                            .substring(0, 1)
+                            .toUpperCase(),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            employee['employee_name'] ?? 'Unknown',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            employee['shift_name'] ?? 'N/A',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(
+                                context,
+                              ).textTheme.bodySmall?.color,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+
+          const SizedBox(height: 16),
+
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ShiftsPage()),
+                );
+              },
+              icon: const Icon(Icons.arrow_forward, size: 18),
+              label: const Text('View All Shifts'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.purple,
+                side: const BorderSide(color: Colors.purple),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildApprovalStat(
+    String number,
+    String label,
+    IconData icon,
+    Color color,
+  ) {
     return Column(
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 18),
-            const SizedBox(width: 4),
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 6),
             Text(
               number,
               style: TextStyle(
-                fontSize: 20,
+                fontSize: 28,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         Text(
           label,
           style: TextStyle(
@@ -1036,6 +1436,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ElevatedButton(
             onPressed: () async {
               await authProvider.logout();
+              await ApiService.logout();
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(builder: (_) => const LoginScreen()),

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 
 // ═══════════════════════════════════════════════════════════════
-// Schedule Card Widget - كارت View Schedule
+// Schedule Card Widget - كارت View Schedule مع API Integration
 // ═══════════════════════════════════════════════════════════════
 
 class ScheduleCard extends StatelessWidget {
@@ -26,21 +27,25 @@ class ScheduleCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: const Color(0xFF1A2332),
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF2A3441)),
+          border: Border.all(color: Theme.of(context).dividerColor),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.calendar_today, color: Colors.white, size: 32),
+            Icon(
+              Icons.calendar_today,
+              color: Theme.of(context).colorScheme.onSurface,
+              size: 32,
+            ),
             const SizedBox(height: 16),
             Text(
               'View Schedule',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ],
@@ -62,104 +67,9 @@ class ScheduleCard extends StatelessWidget {
         minChildSize: 0.5,
         maxChildSize: 0.95,
         builder: (context, scrollController) {
-          return Container(
-            decoration: BoxDecoration(
-              color: Color(0xFF1A2332),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: Column(
-              children: [
-                // Handle Bar
-                Container(
-                  margin: const EdgeInsets.symmetric(vertical: 12),
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-
-                // Header
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'My Schedule',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.close, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Content
-                Expanded(
-                  child: ListView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.all(20),
-                    children: [
-                      _buildScheduleItem(
-                        day: 'Saturday',
-                        date: 'Dec 21, 2024',
-                        shift: 'Morning Shift',
-                        startTime: '08:00 AM',
-                        endTime: '04:00 PM',
-                        status: 'Upcoming',
-                        statusColor: Colors.blue,
-                      ),
-                      _buildScheduleItem(
-                        day: 'Sunday',
-                        date: 'Dec 22, 2024',
-                        shift: 'Morning Shift',
-                        startTime: '08:00 AM',
-                        endTime: '04:00 PM',
-                        status: 'Upcoming',
-                        statusColor: Colors.blue,
-                      ),
-                      _buildScheduleItem(
-                        day: 'Monday',
-                        date: 'Dec 23, 2024',
-                        shift: 'Morning Shift',
-                        startTime: '08:00 AM',
-                        endTime: '04:00 PM',
-                        status: 'Upcoming',
-                        statusColor: Colors.blue,
-                      ),
-                      _buildScheduleItem(
-                        day: 'Tuesday',
-                        date: 'Dec 24, 2024',
-                        shift: 'Evening Shift',
-                        startTime: '04:00 PM',
-                        endTime: '12:00 AM',
-                        status: 'Scheduled',
-                        statusColor: Colors.orange,
-                      ),
-                      _buildScheduleItem(
-                        day: 'Wednesday',
-                        date: 'Dec 25, 2024',
-                        shift: 'Day Off',
-                        startTime: '--',
-                        endTime: '--',
-                        status: 'Holiday',
-                        statusColor: Colors.green,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          return _ScheduleContent(
+            scrollController: scrollController,
+            isBottomSheet: true,
           );
         },
       ),
@@ -173,108 +83,237 @@ class ScheduleCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF1A2332),
+        backgroundColor: Theme.of(context).cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Container(
           constraints: const BoxConstraints(maxHeight: 600),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'My Schedule',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.close, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-              ),
-
-              Divider(color: Color(0xFF2A3441), height: 1),
-
-              // Content
-              Flexible(
-                child: ListView(
-                  padding: const EdgeInsets.all(20),
-                  shrinkWrap: true,
-                  children: [
-                    _buildScheduleItem(
-                      day: 'Saturday',
-                      date: 'Dec 21, 2024',
-                      shift: 'Morning Shift',
-                      startTime: '08:00 AM',
-                      endTime: '04:00 PM',
-                      status: 'Upcoming',
-                      statusColor: Colors.blue,
-                    ),
-                    _buildScheduleItem(
-                      day: 'Sunday',
-                      date: 'Dec 22, 2024',
-                      shift: 'Morning Shift',
-                      startTime: '08:00 AM',
-                      endTime: '04:00 PM',
-                      status: 'Upcoming',
-                      statusColor: Colors.blue,
-                    ),
-                    _buildScheduleItem(
-                      day: 'Monday',
-                      date: 'Dec 23, 2024',
-                      shift: 'Morning Shift',
-                      startTime: '08:00 AM',
-                      endTime: '04:00 PM',
-                      status: 'Upcoming',
-                      statusColor: Colors.blue,
-                    ),
-                    _buildScheduleItem(
-                      day: 'Tuesday',
-                      date: 'Dec 24, 2024',
-                      shift: 'Evening Shift',
-                      startTime: '04:00 PM',
-                      endTime: '12:00 AM',
-                      status: 'Scheduled',
-                      statusColor: Colors.orange,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          child: const _ScheduleContent(isBottomSheet: false),
         ),
       ),
     );
   }
+}
 
-  // ═══════════════════════════════════════════════════════════════
-  // Schedule Item Widget
-  // ═══════════════════════════════════════════════════════════════
-  Widget _buildScheduleItem({
-    required String day,
-    required String date,
-    required String shift,
-    required String startTime,
-    required String endTime,
-    required String status,
-    required Color statusColor,
-  }) {
+// ═══════════════════════════════════════════════════════════════
+// Schedule Content Widget - المحتوى المشترك
+// ═══════════════════════════════════════════════════════════════
+class _ScheduleContent extends StatefulWidget {
+  final ScrollController? scrollController;
+  final bool isBottomSheet;
+
+  const _ScheduleContent({this.scrollController, required this.isBottomSheet});
+
+  @override
+  State<_ScheduleContent> createState() => _ScheduleContentState();
+}
+
+class _ScheduleContentState extends State<_ScheduleContent> {
+  List<dynamic> scheduleList = [];
+  bool isLoading = true;
+  String? errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSchedule();
+  }
+
+  Future<void> _loadSchedule() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
+
+    final response = await ApiService.getMyCurrentShift();
+
+    if (mounted) {
+      if (response.success && response.data != null) {
+        // Try to get weekly schedule
+        final weeklyResponse = await ApiService.getShifts();
+
+        if (mounted) {
+          setState(() {
+            if (weeklyResponse.success && weeklyResponse.data != null) {
+              scheduleList =
+                  weeklyResponse.data['data'] ??
+                  weeklyResponse.data['schedule'] ??
+                  [];
+            }
+            // If no weekly schedule, use current shift
+            if (scheduleList.isEmpty && response.data != null) {
+              scheduleList = [response.data];
+            }
+            isLoading = false;
+          });
+        }
+      } else {
+        setState(() {
+          errorMessage = response.message;
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: widget.isBottomSheet
+            ? const BorderRadius.vertical(top: Radius.circular(24))
+            : BorderRadius.circular(24),
+      ),
+      child: Column(
+        mainAxisSize: widget.isBottomSheet
+            ? MainAxisSize.max
+            : MainAxisSize.min,
+        children: [
+          // Handle Bar (only for bottom sheet)
+          if (widget.isBottomSheet)
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Theme.of(context).dividerColor,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+
+          // Header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'My Schedule',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        Icons.refresh,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      onPressed: _loadSchedule,
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.close,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          if (!widget.isBottomSheet)
+            Divider(color: Theme.of(context).dividerColor, height: 1),
+
+          const SizedBox(height: 8),
+
+          // Content
+          widget.isBottomSheet
+              ? Expanded(child: _buildContent())
+              : Flexible(child: _buildContent()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
+            const SizedBox(height: 16),
+            Text(
+              errorMessage!,
+              style: const TextStyle(fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadSchedule,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (scheduleList.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.calendar_today_outlined,
+              size: 48,
+              color: Theme.of(context).textTheme.bodySmall?.color,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No schedule available',
+              style: TextStyle(
+                fontSize: 14,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.all(20),
+      shrinkWrap: !widget.isBottomSheet,
+      itemCount: scheduleList.length,
+      itemBuilder: (context, index) {
+        final schedule = scheduleList[index];
+        return _buildScheduleItem(schedule);
+      },
+    );
+  }
+
+  Widget _buildScheduleItem(Map<String, dynamic> schedule) {
+    final day =
+        schedule['day']?.toString() ??
+        _getDayName(schedule['date']?.toString());
+    final date = _formatDate(schedule['date']?.toString() ?? '');
+    final shift =
+        schedule['shift_name']?.toString() ??
+        schedule['name']?.toString() ??
+        'N/A';
+    final startTime = schedule['start_time']?.toString() ?? '--';
+    final endTime = schedule['end_time']?.toString() ?? '--';
+    final status = _getStatus(schedule);
+    final statusColor = _getStatusColor(status);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F1419),
+        color: Theme.of(context).scaffoldBackgroundColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2A3441)),
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -290,13 +329,16 @@ class ScheduleCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     date,
-                    style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                    ),
                   ),
                 ],
               ),
@@ -306,9 +348,9 @@ class ScheduleCard extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.1),
+                  color: statusColor.withValues(alpha: 26),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                  border: Border.all(color: statusColor.withValues(alpha: 77)),
                 ),
                 child: Text(
                   status,
@@ -323,19 +365,23 @@ class ScheduleCard extends StatelessWidget {
           ),
 
           const SizedBox(height: 12),
-          Divider(color: Color(0xFF2A3441), height: 1),
+          Divider(color: Theme.of(context).dividerColor, height: 1),
           const SizedBox(height: 12),
 
           Row(
             children: [
-              Icon(Icons.access_time, color: Color(0xFF5B9FED), size: 20),
+              Icon(
+                Icons.access_time,
+                color: Theme.of(context).colorScheme.primary,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Text(
                 shift,
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF5B9FED),
+                  color: Theme.of(context).colorScheme.primary,
                 ),
               ),
             ],
@@ -345,17 +391,144 @@ class ScheduleCard extends StatelessWidget {
 
           Row(
             children: [
-              Icon(Icons.schedule, color: Color(0xFF9CA3AF), size: 18),
+              Icon(
+                Icons.schedule,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+                size: 18,
+              ),
               const SizedBox(width: 8),
               Text(
                 '$startTime - $endTime',
-                style: TextStyle(fontSize: 14, color: Color(0xFF9CA3AF)),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                ),
               ),
             ],
           ),
+
+          // Show work days if available
+          if (schedule['work_days'] != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  Icons.calendar_view_week,
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _formatWorkDays(schedule['work_days']),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  String _getDayName(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return 'Unknown';
+    try {
+      final date = DateTime.parse(dateStr);
+      final days = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      return days[date.weekday - 1];
+    } catch (e) {
+      return 'Unknown';
+    }
+  }
+
+  String _formatDate(String dateStr) {
+    if (dateStr.isEmpty) return '';
+    try {
+      final date = DateTime.parse(dateStr);
+      final months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      return '${months[date.month - 1]} ${date.day}, ${date.year}';
+    } catch (e) {
+      return dateStr;
+    }
+  }
+
+  String _getStatus(Map<String, dynamic> schedule) {
+    final status = schedule['status']?.toString().toLowerCase();
+    if (status != null) {
+      if (status == 'holiday' || status == 'off') return 'Holiday';
+      if (status == 'completed') return 'Completed';
+      if (status == 'active') return 'Active';
+    }
+
+    // Check by date
+    final dateStr = schedule['date']?.toString();
+    if (dateStr != null && dateStr.isNotEmpty) {
+      try {
+        final date = DateTime.parse(dateStr);
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        final scheduleDate = DateTime(date.year, date.month, date.day);
+
+        if (scheduleDate.isBefore(today)) return 'Completed';
+        if (scheduleDate.isAtSameMomentAs(today)) return 'Today';
+        return 'Upcoming';
+      } catch (e) {
+        return 'Scheduled';
+      }
+    }
+
+    return 'Scheduled';
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'today':
+      case 'active':
+        return Colors.green;
+      case 'upcoming':
+        return Colors.blue;
+      case 'completed':
+        return Colors.grey;
+      case 'holiday':
+        return Colors.purple;
+      default:
+        return Colors.orange;
+    }
+  }
+
+  String _formatWorkDays(dynamic workDays) {
+    if (workDays == null) return '';
+    if (workDays is String) return workDays;
+    if (workDays is List) {
+      return workDays.join(', ');
+    }
+    return workDays.toString();
   }
 }
 
