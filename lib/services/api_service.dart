@@ -2,54 +2,59 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'demo_data.dart';
 
 /// ============================================================================
 /// HR Pro - API Service
 /// ============================================================================
-/// ملف مركزي لجميع الـ API Calls
-/// الإصدار: 1.0.0
+/// Central file for all API calls
+/// Version: 1.0.0
 /// ============================================================================
 
 class ApiService {
   // ══════════════════════════════════════════════════════════════════════════
   // Configuration
   // ══════════════════════════════════════════════════════════════════════════
-  
-  /// Base URL - غيّره حسب سيرفر الباك اند
+
+  /// Base URL - Change this to your backend server URL
   static const String baseUrl = 'https://your-api-domain.com/api';
-  
-  /// Timeout للـ requests (بالثواني)
+
+  /// Request timeout in seconds
   static const int timeoutSeconds = 30;
+
+  /// Demo Mode - Enable to use demo login accounts
+  /// Set to false when backend is ready
+  static const bool isDemoMode = true;
 
   // ══════════════════════════════════════════════════════════════════════════
   // Token Management
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// حفظ الـ Token بعد تسجيل الدخول
+  /// Save token after login
   static Future<void> saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('auth_token', token);
   }
 
-  /// جلب الـ Token المحفوظ
+  /// Get saved token
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('auth_token');
   }
 
-  /// حذف الـ Token (تسجيل خروج)
+  /// Remove token (logout)
   static Future<void> removeToken() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
   }
 
-  /// حفظ بيانات المستخدم
+  /// Save user data
   static Future<void> saveUserData(Map<String, dynamic> userData) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('user_data', jsonEncode(userData));
   }
 
-  /// جلب بيانات المستخدم المحفوظة
+  /// Get saved user data
   static Future<Map<String, dynamic>?> getUserData() async {
     final prefs = await SharedPreferences.getInstance();
     final data = prefs.getString('user_data');
@@ -63,13 +68,13 @@ class ApiService {
   // Headers
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Headers بدون Token (للـ Login و Register)
+  /// Headers without token (for Login and Register)
   static Map<String, String> get _publicHeaders => {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   };
 
-  /// Headers مع Token (للـ Authenticated Requests)
+  /// Headers with token (for authenticated requests)
   static Future<Map<String, String>> get _authHeaders async {
     final token = await getToken();
     return {
@@ -165,7 +170,7 @@ class ApiService {
   // Response & Error Handling
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// معالجة الـ Response
+  /// Handle API response
   static ApiResponse _handleResponse(http.Response response) {
     final body = response.body.isNotEmpty ? jsonDecode(response.body) : null;
 
@@ -180,33 +185,31 @@ class ApiService {
       case 400:
         return ApiResponse(
           success: false,
-          message: body?['message'] ?? 'طلب غير صالح',
+          message: body?['message'] ?? 'Bad request',
           statusCode: 400,
         );
       case 401:
-        // Token منتهي أو غير صالح
         removeToken();
         return ApiResponse(
           success: false,
-          message: 'جلسة منتهية، يرجى تسجيل الدخول مرة أخرى',
+          message: 'Session expired, please login again',
           statusCode: 401,
         );
       case 403:
         return ApiResponse(
           success: false,
-          message: 'غير مصرح لك بهذا الإجراء',
+          message: 'You are not authorized to perform this action',
           statusCode: 403,
         );
       case 404:
         return ApiResponse(
           success: false,
-          message: 'البيانات غير موجودة',
+          message: 'Data not found',
           statusCode: 404,
         );
       case 422:
-        // Validation Errors
         final errors = body?['errors'];
-        String errorMessage = 'بيانات غير صالحة';
+        String errorMessage = 'Invalid data';
         if (errors is Map) {
           errorMessage = errors.values.first is List
               ? errors.values.first.first
@@ -221,36 +224,36 @@ class ApiService {
       case 500:
         return ApiResponse(
           success: false,
-          message: 'خطأ في الخادم، يرجى المحاولة لاحقاً',
+          message: 'Server error, please try again later',
           statusCode: 500,
         );
       default:
         return ApiResponse(
           success: false,
-          message: 'حدث خطأ غير متوقع',
+          message: 'An unexpected error occurred',
           statusCode: response.statusCode,
         );
     }
   }
 
-  /// معالجة الأخطاء
+  /// Handle errors
   static ApiResponse _handleError(dynamic error) {
     if (error is SocketException) {
       return ApiResponse(
         success: false,
-        message: 'لا يوجد اتصال بالإنترنت',
+        message: 'No internet connection',
         statusCode: 0,
       );
     } else if (error.toString().contains('TimeoutException')) {
       return ApiResponse(
         success: false,
-        message: 'انتهت مهلة الاتصال، يرجى المحاولة مرة أخرى',
+        message: 'Connection timeout, please try again',
         statusCode: 0,
       );
     }
     return ApiResponse(
       success: false,
-      message: 'حدث خطأ: ${error.toString()}',
+      message: 'Error: ${error.toString()}',
       statusCode: 0,
     );
   }
@@ -259,11 +262,39 @@ class ApiService {
   // Authentication Endpoints
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// تسجيل الدخول
+  /// Login
   static Future<ApiResponse> login({
     required String email,
     required String password,
   }) async {
+    // Demo Mode - Use demo accounts for login
+    if (isDemoMode) {
+      final user = DemoData.users[email.toLowerCase()];
+      if (user != null && user['password'] == password) {
+        final userData = Map<String, dynamic>.from(user);
+        userData.remove('password');
+
+        await saveToken('demo_token_${user['id']}');
+        await saveUserData(userData);
+
+        return ApiResponse(
+          success: true,
+          data: {
+            'token': 'demo_token_${user['id']}',
+            'user': userData,
+          },
+          statusCode: 200,
+        );
+      } else {
+        return ApiResponse(
+          success: false,
+          message: 'Invalid email or password',
+          statusCode: 401,
+        );
+      }
+    }
+
+    // Real API call
     final response = await post(
       '/auth/login',
       body: {
@@ -273,7 +304,6 @@ class ApiService {
       auth: false,
     );
 
-    // حفظ التوكن وبيانات المستخدم عند النجاح
     if (response.success && response.data != null) {
       await saveToken(response.data['token']);
       await saveUserData(response.data['user']);
@@ -282,7 +312,7 @@ class ApiService {
     return response;
   }
 
-  /// تسجيل مستخدم جديد
+  /// Register new user
   static Future<ApiResponse> register({
     required String name,
     required String email,
@@ -303,14 +333,14 @@ class ApiService {
     );
   }
 
-  /// تسجيل الخروج
+  /// Logout
   static Future<ApiResponse> logout() async {
     final response = await post('/auth/logout');
     await removeToken();
     return response;
   }
 
-  /// نسيت كلمة المرور
+  /// Forgot password
   static Future<ApiResponse> forgotPassword({required String email}) async {
     return await post(
       '/auth/forgot-password',
@@ -319,7 +349,7 @@ class ApiService {
     );
   }
 
-  /// إعادة تعيين كلمة المرور
+  /// Reset password
   static Future<ApiResponse> resetPassword({
     required String token,
     required String email,
@@ -338,12 +368,12 @@ class ApiService {
     );
   }
 
-  /// جلب بيانات المستخدم الحالي
+  /// Get current user data
   static Future<ApiResponse> getCurrentUser() async {
     return await get('/auth/me');
   }
 
-  /// تحديث الملف الشخصي
+  /// Update profile
   static Future<ApiResponse> updateProfile({
     String? name,
     String? email,
@@ -361,7 +391,7 @@ class ApiService {
     );
   }
 
-  /// تغيير كلمة المرور
+  /// Change password
   static Future<ApiResponse> changePassword({
     required String currentPassword,
     required String newPassword,
@@ -381,22 +411,22 @@ class ApiService {
   // Dashboard Endpoints
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// جلب إحصائيات الداشبورد
+  /// Get dashboard statistics
   static Future<ApiResponse> getDashboardStats() async {
     return await get('/dashboard/stats');
   }
 
-  /// جلب آخر الأنشطة
+  /// Get recent activities
   static Future<ApiResponse> getRecentActivities({int limit = 10}) async {
     return await get('/dashboard/activities?limit=$limit');
   }
 
-  /// جلب الإشعارات
+  /// Get notifications
   static Future<ApiResponse> getNotifications({int page = 1}) async {
     return await get('/dashboard/notifications?page=$page');
   }
 
-  /// تحديد الإشعار كمقروء
+  /// Mark notification as read
   static Future<ApiResponse> markNotificationAsRead(int notificationId) async {
     return await put('/dashboard/notifications/$notificationId/read');
   }
@@ -405,7 +435,7 @@ class ApiService {
   // Employees Endpoints
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// جلب قائمة الموظفين
+  /// Get employees list
   static Future<ApiResponse> getEmployees({
     int page = 1,
     int perPage = 10,
@@ -420,12 +450,12 @@ class ApiService {
     return await get(endpoint);
   }
 
-  /// جلب بيانات موظف واحد
+  /// Get single employee
   static Future<ApiResponse> getEmployee(int employeeId) async {
     return await get('/employees/$employeeId');
   }
 
-  /// إضافة موظف جديد
+  /// Create new employee
   static Future<ApiResponse> createEmployee({
     required String name,
     required String email,
@@ -451,7 +481,7 @@ class ApiService {
     );
   }
 
-  /// تحديث بيانات موظف
+  /// Update employee
   static Future<ApiResponse> updateEmployee({
     required int employeeId,
     String? name,
@@ -476,12 +506,12 @@ class ApiService {
     );
   }
 
-  /// حذف موظف
+  /// Delete employee
   static Future<ApiResponse> deleteEmployee(int employeeId) async {
     return await delete('/employees/$employeeId');
   }
 
-  /// جلب الأقسام
+  /// Get departments
   static Future<ApiResponse> getDepartments() async {
     return await get('/employees/departments');
   }
@@ -490,7 +520,7 @@ class ApiService {
   // Attendance Endpoints
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// تسجيل حضور (Check In)
+  /// Check In
   static Future<ApiResponse> checkIn({
     String? notes,
     double? latitude,
@@ -507,7 +537,7 @@ class ApiService {
     );
   }
 
-  /// تسجيل انصراف (Check Out)
+  /// Check Out
   static Future<ApiResponse> checkOut({
     String? notes,
     double? latitude,
@@ -524,7 +554,7 @@ class ApiService {
     );
   }
 
-  /// جلب سجل الحضور للمستخدم الحالي
+  /// Get current user's attendance records
   static Future<ApiResponse> getMyAttendance({
     String? startDate,
     String? endDate,
@@ -536,7 +566,7 @@ class ApiService {
     return await get(endpoint);
   }
 
-  /// جلب سجل حضور جميع الموظفين (Admin)
+  /// Get all employees attendance (Admin)
   static Future<ApiResponse> getAllAttendance({
     String? startDate,
     String? endDate,
@@ -557,7 +587,7 @@ class ApiService {
     return await get(endpoint);
   }
 
-  /// تسجيل حضور يدوي (Admin)
+  /// Manual attendance mark (Admin)
   static Future<ApiResponse> markAttendance({
     required String employeeId,
     String? checkIn,
@@ -579,12 +609,12 @@ class ApiService {
     );
   }
 
-  /// جلب حالة الحضور اليوم
+  /// Get today's attendance status
   static Future<ApiResponse> getTodayAttendanceStatus() async {
     return await get('/attendance/today');
   }
 
-  /// تعديل سجل حضور (Admin)
+  /// Update attendance record (Admin)
   static Future<ApiResponse> updateAttendance({
     required int attendanceId,
     String? checkIn,
@@ -607,17 +637,17 @@ class ApiService {
   // Shifts Endpoints
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// جلب جميع الشفتات
+  /// Get all shifts
   static Future<ApiResponse> getShifts({int page = 1}) async {
     return await get('/shifts?page=$page');
   }
 
-  /// جلب شفت واحد
+  /// Get single shift
   static Future<ApiResponse> getShift(int shiftId) async {
     return await get('/shifts/$shiftId');
   }
 
-  /// إنشاء شفت جديد
+  /// Create new shift
   static Future<ApiResponse> createShift({
     required String name,
     required String startTime,
@@ -637,7 +667,7 @@ class ApiService {
     );
   }
 
-  /// تحديث شفت
+  /// Update shift
   static Future<ApiResponse> updateShift({
     required int shiftId,
     String? name,
@@ -658,12 +688,12 @@ class ApiService {
     );
   }
 
-  /// حذف شفت
+  /// Delete shift
   static Future<ApiResponse> deleteShift(int shiftId) async {
     return await delete('/shifts/$shiftId');
   }
 
-  /// تعيين شفت لموظف
+  /// Assign shift to employee
   static Future<ApiResponse> assignShiftToEmployee({
     required int shiftId,
     required int employeeId,
@@ -680,7 +710,7 @@ class ApiService {
     );
   }
 
-  /// جلب الشفت الحالي للمستخدم
+  /// Get current user's shift
   static Future<ApiResponse> getMyCurrentShift() async {
     return await get('/shifts/my/current');
   }
@@ -689,7 +719,7 @@ class ApiService {
   // Reports Endpoints
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// تقرير الحضور
+  /// Get attendance report
   static Future<ApiResponse> getAttendanceReport({
     required String startDate,
     required String endDate,
@@ -702,7 +732,7 @@ class ApiService {
     return await get(endpoint);
   }
 
-  /// تقرير الموظفين
+  /// Get employees report
   static Future<ApiResponse> getEmployeesReport({
     String? department,
     String? status,
@@ -715,7 +745,7 @@ class ApiService {
     return await get(endpoint);
   }
 
-  /// تقرير الشفتات
+  /// Get shifts report
   static Future<ApiResponse> getShiftsReport({
     required String startDate,
     required String endDate,
@@ -723,7 +753,7 @@ class ApiService {
     return await get('/reports/shifts?start_date=$startDate&end_date=$endDate');
   }
 
-  /// ملخص شهري
+  /// Get monthly summary
   static Future<ApiResponse> getMonthlySummary({
     required int year,
     required int month,
@@ -731,7 +761,7 @@ class ApiService {
     return await get('/reports/monthly?year=$year&month=$month');
   }
 
-  /// تصدير تقرير PDF
+  /// Export PDF report
   static Future<ApiResponse> exportReportPdf({
     required String reportType,
     required String startDate,
@@ -742,7 +772,7 @@ class ApiService {
     );
   }
 
-  /// تصدير تقرير Excel
+  /// Export Excel report
   static Future<ApiResponse> exportReportExcel({
     required String reportType,
     required String startDate,
@@ -754,10 +784,10 @@ class ApiService {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Leave Requests Endpoints (إضافي - طلبات الإجازات)
+  // Leave Requests Endpoints
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// جلب طلبات الإجازات
+  /// Get leave requests
   static Future<ApiResponse> getLeaveRequests({
     int page = 1,
     String? status,
@@ -767,7 +797,7 @@ class ApiService {
     return await get(endpoint);
   }
 
-  /// إنشاء طلب إجازة
+  /// Create leave request
   static Future<ApiResponse> createLeaveRequest({
     required String type,
     required String startDate,
@@ -785,7 +815,7 @@ class ApiService {
     );
   }
 
-  /// الموافقة/الرفض على طلب إجازة (Admin)
+  /// Approve/Reject leave request (Admin)
   static Future<ApiResponse> updateLeaveRequestStatus({
     required int requestId,
     required String status,

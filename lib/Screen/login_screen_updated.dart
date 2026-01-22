@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'auth_models.dart';
 import '../services/api_service.dart';
+import '../theme_provider.dart';
 import 'dashboard_screen.dart';
 import 'create_account_page.dart';
 
 // ═══════════════════════════════════════════════════════════════
-// Login Screen - محدّث مع API Integration
+// Login Screen - محدّث مع API Integration و Theme Provider
 // ═══════════════════════════════════════════════════════════════
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -22,9 +24,37 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _obscurePassword = true;
   bool _rememberMe = false;
-  bool _isDarkMode = true;
   bool _isLoading = false;
   String? _errorMessage;
+
+  // Email validation regex
+  final _emailRegex = RegExp(r'^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4}$');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedEmail();
+  }
+
+  Future<void> _loadSavedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString('remembered_email');
+    if (savedEmail != null && savedEmail.isNotEmpty) {
+      setState(() {
+        _emailController.text = savedEmail;
+        _rememberMe = true;
+      });
+    }
+  }
+
+  Future<void> _saveEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_rememberMe) {
+      await prefs.setString('remembered_email', _emailController.text.trim());
+    } else {
+      await prefs.remove('remembered_email');
+    }
+  }
 
   @override
   void dispose() {
@@ -40,6 +70,9 @@ class _LoginScreenState extends State<LoginScreen> {
       _isLoading = true;
       _errorMessage = null;
     });
+
+    // Save email if remember me is checked
+    await _saveEmail();
 
     final response = await ApiService.login(
       email: _emailController.text.trim(),
@@ -75,15 +108,17 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleForgotPassword() async {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    final isDarkMode = themeProvider.isDarkMode;
     final emailController = TextEditingController();
 
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: _isDarkMode ? const Color(0xFF1A2332) : Colors.white,
+        backgroundColor: isDarkMode ? const Color(0xFF1A2332) : Colors.white,
         title: Text(
           'Reset Password',
-          style: TextStyle(color: _isDarkMode ? Colors.white : Colors.black),
+          style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -91,7 +126,7 @@ class _LoginScreenState extends State<LoginScreen> {
             Text(
               'Enter your email address to receive a password reset link.',
               style: TextStyle(
-                color: _isDarkMode ? Colors.white70 : Colors.black54,
+                color: isDarkMode ? Colors.white70 : Colors.black54,
               ),
             ),
             const SizedBox(height: 16),
@@ -99,7 +134,7 @@ class _LoginScreenState extends State<LoginScreen> {
               controller: emailController,
               keyboardType: TextInputType.emailAddress,
               style: TextStyle(
-                color: _isDarkMode ? Colors.white : Colors.black,
+                color: isDarkMode ? Colors.white : Colors.black,
               ),
               decoration: InputDecoration(
                 labelText: 'Email Address',
@@ -107,7 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 filled: true,
-                fillColor: _isDarkMode
+                fillColor: isDarkMode
                     ? const Color(0xFF0F1419)
                     : Colors.grey[100],
               ),
@@ -152,34 +187,36 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDarkMode = themeProvider.isDarkMode;
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 768;
 
     return Scaffold(
-      backgroundColor: _isDarkMode ? const Color(0xFF0F1419) : Colors.white,
+      backgroundColor: isDarkMode ? const Color(0xFF0F1419) : Colors.white,
       body: SafeArea(
-        child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+        child: isMobile ? _buildMobileLayout(isDarkMode, themeProvider) : _buildDesktopLayout(isDarkMode, themeProvider),
       ),
     );
   }
 
-  Widget _buildDesktopLayout() {
+  Widget _buildDesktopLayout(bool isDarkMode, ThemeProvider themeProvider) {
     return Row(
       children: [
         // Left Panel
         Expanded(flex: 5, child: _buildLeftPanel()),
         // Right Form
-        Expanded(flex: 7, child: _buildLoginForm()),
+        Expanded(flex: 7, child: _buildLoginForm(isDarkMode, themeProvider)),
       ],
     );
   }
 
-  Widget _buildMobileLayout() {
+  Widget _buildMobileLayout(bool isDarkMode, ThemeProvider themeProvider) {
     return SingleChildScrollView(
       child: Column(
         children: [
           SizedBox(height: 200, child: _buildLeftPanel()),
-          _buildLoginForm(),
+          _buildLoginForm(isDarkMode, themeProvider),
         ],
       ),
     );
@@ -202,7 +239,7 @@ class _LoginScreenState extends State<LoginScreen> {
               width: 100,
               height: 100,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(24),
               ),
               child: const Icon(
@@ -231,7 +268,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildLoginForm() {
+  Widget _buildLoginForm(bool isDarkMode, ThemeProvider themeProvider) {
     return Container(
       padding: const EdgeInsets.all(40),
       child: Center(
@@ -248,11 +285,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   alignment: Alignment.topRight,
                   child: IconButton(
                     icon: Icon(
-                      _isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                      color: _isDarkMode ? Colors.white : Colors.black,
+                      isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                      color: isDarkMode ? Colors.white : Colors.black,
                     ),
                     onPressed: () {
-                      setState(() => _isDarkMode = !_isDarkMode);
+                      themeProvider.toggleTheme();
                     },
                   ),
                 ),
@@ -261,11 +298,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 // Welcome Text
                 Text(
-                  'Welcome Back! 👋',
+                  'Welcome Back!',
                   style: TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.w900,
-                    color: _isDarkMode ? Colors.white : Colors.black,
+                    color: isDarkMode ? Colors.white : Colors.black,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -273,20 +310,68 @@ class _LoginScreenState extends State<LoginScreen> {
                   'Sign in to continue to HR Pro',
                   style: TextStyle(
                     fontSize: 15,
-                    color: _isDarkMode ? Colors.white60 : Colors.black54,
+                    color: isDarkMode ? Colors.white60 : Colors.black54,
                   ),
                 ),
 
-                const SizedBox(height: 40),
+                const SizedBox(height: 20),
+
+                // Demo Mode Banner
+                if (ApiService.isDemoMode) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Demo Mode',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange[700],
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Admin: admin@hrpro.com / admin123',
+                          style: TextStyle(
+                            color: isDarkMode ? Colors.white70 : Colors.black87,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Employee: employee@hrpro.com / emp123',
+                          style: TextStyle(
+                            color: isDarkMode ? Colors.white70 : Colors.black87,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
 
                 // Error Message
                 if (_errorMessage != null) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.1),
+                      color: Colors.red.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.red.withOpacity(0.3)),
+                      border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       children: [
@@ -316,7 +401,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   style: TextStyle(
-                    color: _isDarkMode ? Colors.white : Colors.black,
+                    color: isDarkMode ? Colors.white : Colors.black,
                   ),
                   decoration: InputDecoration(
                     labelText: 'Email Address',
@@ -326,7 +411,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     filled: true,
-                    fillColor: _isDarkMode
+                    fillColor: isDarkMode
                         ? const Color(0xFF1A2332)
                         : Colors.grey[100],
                   ),
@@ -334,8 +419,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value == null || value.isEmpty) {
                       return 'Please enter your email';
                     }
-                    if (!value.contains('@')) {
-                      return 'Please enter a valid email';
+                    if (!_emailRegex.hasMatch(value)) {
+                      return 'Please enter a valid email address';
                     }
                     return null;
                   },
@@ -348,7 +433,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   controller: _passwordController,
                   obscureText: _obscurePassword,
                   style: TextStyle(
-                    color: _isDarkMode ? Colors.white : Colors.black,
+                    color: isDarkMode ? Colors.white : Colors.black,
                   ),
                   decoration: InputDecoration(
                     labelText: 'Password',
@@ -368,7 +453,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     filled: true,
-                    fillColor: _isDarkMode
+                    fillColor: isDarkMode
                         ? const Color(0xFF1A2332)
                         : Colors.grey[100],
                   ),
@@ -398,7 +483,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         Text(
                           'Remember me',
                           style: TextStyle(
-                            color: _isDarkMode
+                            color: isDarkMode
                                 ? Colors.white70
                                 : Colors.black54,
                           ),

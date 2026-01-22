@@ -15,6 +15,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   final TextEditingController _searchController = TextEditingController();
   String selectedFilter = 'Daily';
 
+  // Filter Variables
+  String _filterStatus = 'All';
+  String _filterDepartment = 'All';
+  final List<String> _statusOptions = ['All', 'Present', 'Late', 'Absent', 'Early'];
+  final List<String> _departmentOptions = ['All', 'IT', 'HR', 'Sales', 'Finance', 'Marketing', 'Operations'];
+
   // State Variables
   List<Map<String, dynamic>> attendanceRecords = [];
   List<Map<String, dynamic>> employees = [];
@@ -868,48 +874,75 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   void _showFilterDialog() {
+    String tempStatus = _filterStatus;
+    String tempDepartment = _filterDepartment;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Filter Options'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: const Text('Status'),
-              trailing: DropdownButton<String>(
-                value: 'All',
-                items: ['All', 'Present', 'Late', 'Absent', 'Early']
-                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                    .toList(),
-                onChanged: (v) {},
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Filter Options'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: const Text('Status'),
+                trailing: DropdownButton<String>(
+                  value: tempStatus,
+                  items: _statusOptions
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) {
+                      setDialogState(() => tempStatus = v);
+                    }
+                  },
+                ),
               ),
+              ListTile(
+                title: const Text('Department'),
+                trailing: DropdownButton<String>(
+                  value: tempDepartment,
+                  items: _departmentOptions
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) {
+                      setDialogState(() => tempDepartment = v);
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                // Reset filters
+                setDialogState(() {
+                  tempStatus = 'All';
+                  tempDepartment = 'All';
+                });
+              },
+              child: const Text('Reset'),
             ),
-            ListTile(
-              title: const Text('Department'),
-              trailing: DropdownButton<String>(
-                value: 'All',
-                items: ['All', 'IT', 'HR', 'Sales', 'Finance']
-                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                    .toList(),
-                onChanged: (v) {},
-              ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  _filterStatus = tempStatus;
+                  _filterDepartment = tempDepartment;
+                });
+                Navigator.pop(context);
+                _loadData();
+              },
+              child: const Text('Apply'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _loadData();
-            },
-            child: const Text('Apply'),
-          ),
-        ],
       ),
     );
   }
@@ -973,40 +1006,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Future<void> _sendEmail() async {
-    final emailController = TextEditingController();
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        title: const Text('Send Report'),
-        content: TextField(
-          controller: emailController,
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            hintText: 'admin@company.com',
-            border: OutlineInputBorder(),
-          ),
-          keyboardType: TextInputType.emailAddress,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Send'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true && emailController.text.isNotEmpty && mounted) {
+    // Show feature coming soon message
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Email sent!'),
-          backgroundColor: Colors.green,
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.white),
+              SizedBox(width: 8),
+              Text('Email feature is coming soon'),
+            ],
+          ),
+          backgroundColor: Colors.orange[700],
+          duration: const Duration(seconds: 3),
         ),
       );
     }

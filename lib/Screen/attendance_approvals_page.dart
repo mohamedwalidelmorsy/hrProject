@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'auth_models.dart';
+import '../services/api_service.dart';
 
 class AttendanceApprovalsPage extends StatefulWidget {
   const AttendanceApprovalsPage({super.key});
@@ -16,10 +17,20 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
   String selectedDate = 'Today';
   String selectedDepartment = 'All';
 
+  // State Variables
+  List<Map<String, dynamic>> pendingApprovals = [];
+  List<Map<String, dynamic>> approvedApprovals = [];
+  List<Map<String, dynamic>> rejectedApprovals = [];
+  bool isLoadingPending = true;
+  bool isLoadingApproved = true;
+  bool isLoadingRejected = true;
+  String? errorMessage;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _loadAllData();
   }
 
   @override
@@ -28,12 +39,65 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
     super.dispose();
   }
 
+  Future<void> _loadAllData() async {
+    await Future.wait([
+      _loadApprovals('pending'),
+      _loadApprovals('approved'),
+      _loadApprovals('rejected'),
+    ]);
+  }
+
+  Future<void> _loadApprovals(String status) async {
+    final response = await ApiService.getAllAttendance(
+      page: 1,
+      perPage: 50,
+      status: status,
+    );
+
+    if (mounted) {
+      setState(() {
+        if (response.success && response.data != null) {
+          final data = List<Map<String, dynamic>>.from(
+            response.data['data'] ?? [],
+          );
+          switch (status) {
+            case 'pending':
+              pendingApprovals = data;
+              isLoadingPending = false;
+              break;
+            case 'approved':
+              approvedApprovals = data;
+              isLoadingApproved = false;
+              break;
+            case 'rejected':
+              rejectedApprovals = data;
+              isLoadingRejected = false;
+              break;
+          }
+        } else {
+          errorMessage = response.message;
+          switch (status) {
+            case 'pending':
+              isLoadingPending = false;
+              break;
+            case 'approved':
+              isLoadingApproved = false;
+              break;
+            case 'rejected':
+              isLoadingRejected = false;
+              break;
+          }
+        }
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
 
     if (!authProvider.isAdmin) {
-      return Scaffold(body: Center(child: Text('Admin access only')));
+      return const Scaffold(body: Center(child: Text('Admin access only')));
     }
 
     return Scaffold(
@@ -47,55 +111,90 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
           IconButton(
             icon: const Icon(Icons.filter_list),
             onPressed: _showFilters,
+            tooltip: 'Filter',
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () => setState(() {}),
+            onPressed: () {
+              setState(() {
+                isLoadingPending = true;
+                isLoadingApproved = true;
+                isLoadingRejected = true;
+              });
+              _loadAllData();
+            },
+            tooltip: 'Refresh',
           ),
         ],
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Theme.of(context).colorScheme.primary,
           labelColor: Theme.of(context).colorScheme.primary,
-          tabs: const [
-            Tab(text: 'Pending'),
-            Tab(text: 'Approved'),
-            Tab(text: 'Rejected'),
+          tabs: [
+            Tab(text: 'Pending (${pendingApprovals.length})'),
+            Tab(text: 'Approved (${approvedApprovals.length})'),
+            Tab(text: 'Rejected (${rejectedApprovals.length})'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildScrollableList('pending'),
-          _buildScrollableList('approved'),
-          _buildScrollableList('rejected'),
+          _buildApprovalsList('pending', pendingApprovals, isLoadingPending),
+          _buildApprovalsList('approved', approvedApprovals, isLoadingApproved),
+          _buildApprovalsList('rejected', rejectedApprovals, isLoadingRejected),
         ],
       ),
     );
   }
 
-  Widget _buildScrollableList(String status) {
-    final itemCount = status == 'pending'
-        ? 15
-        : status == 'approved'
-        ? 145
-        : 3;
+  Widget _buildApprovalsList(
+      String status, List<Map<String, dynamic>> approvals, bool isLoading) {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _buildSummaryStats()),
         const SliverToBoxAdapter(child: SizedBox(height: 16)),
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) =>
-                  _buildAttendanceCard(index: index, status: status),
-              childCount: itemCount,
+        if (approvals.isEmpty)
+          SliverFillRemaining(
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    status == 'pending'
+                        ? Icons.hourglass_empty
+                        : status == 'approved'
+                            ? Icons.check_circle_outline
+                            : Icons.cancel_outlined,
+                    size: 64,
+                    color: Colors.grey,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No $status attendance records',
+                    style: const TextStyle(fontSize: 16, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _buildAttendanceCard(
+                  approval: approvals[index],
+                  status: status,
+                ),
+                childCount: approvals.length,
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -116,11 +215,14 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildStatItem('15', 'Pending', Icons.pending_actions),
+          _buildStatItem(
+              '${pendingApprovals.length}', 'Pending', Icons.pending_actions),
           Container(width: 1, height: 40, color: Colors.white30),
-          _buildStatItem('145', 'Approved', Icons.check_circle),
+          _buildStatItem(
+              '${approvedApprovals.length}', 'Approved', Icons.check_circle),
           Container(width: 1, height: 40, color: Colors.white30),
-          _buildStatItem('3', 'Rejected', Icons.cancel),
+          _buildStatItem(
+              '${rejectedApprovals.length}', 'Rejected', Icons.cancel),
         ],
       ),
     );
@@ -144,9 +246,24 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
     );
   }
 
-  Widget _buildAttendanceCard({required int index, required String status}) {
+  Widget _buildAttendanceCard({
+    required Map<String, dynamic> approval,
+    required String status,
+  }) {
     final statusColor = _getStatusColor(status);
-    final employeeName = 'Employee ${index + 1}';
+    final employeeName =
+        approval['employee_name']?.toString() ??
+        approval['name']?.toString() ??
+        'Unknown Employee';
+    final empId =
+        approval['emp_id']?.toString() ??
+        approval['employee_id']?.toString() ??
+        'N/A';
+    final department = approval['department']?.toString() ?? 'N/A';
+    final checkIn = approval['check_in']?.toString() ?? approval['checkIn']?.toString() ?? 'N/A';
+    final checkOut = approval['check_out']?.toString() ?? approval['checkOut']?.toString() ?? 'N/A';
+    final date = approval['date']?.toString() ?? 'N/A';
+    final approvalId = approval['id'];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -165,7 +282,9 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
                   radius: 28,
                   backgroundColor: Theme.of(context).colorScheme.primary,
                   child: Text(
-                    'E${index + 1}',
+                    employeeName.isNotEmpty
+                        ? employeeName.substring(0, 1).toUpperCase()
+                        : 'U',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -181,12 +300,15 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            employeeName,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.onSurface,
+                          Expanded(
+                            child: Text(
+                              employeeName,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           Container(
@@ -211,8 +333,19 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'EMP00${index + 1} • IT Department',
-                        style: TextStyle(fontSize: 13, color: Colors.grey),
+                        '$empId - $department',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).textTheme.bodySmall?.color,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Date: $date | In: $checkIn | Out: $checkOut',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).textTheme.bodySmall?.color,
+                        ),
                       ),
                     ],
                   ),
@@ -221,30 +354,38 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
             ),
           ),
           if (status == 'pending')
-            Padding(
+            Container(
               padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(16),
+                ),
+              ),
               child: Row(
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: () {},
+                      onPressed: () => _approveAttendance(approvalId, employeeName),
                       icon: const Icon(Icons.check, size: 18),
                       label: const Text('Approve'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                       ),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: () {},
+                      onPressed: () => _rejectAttendance(approvalId, employeeName),
                       icon: const Icon(Icons.close, size: 18),
                       label: const Text('Reject'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                         side: const BorderSide(color: Colors.red),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                       ),
                     ),
                   ),
@@ -254,6 +395,123 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
         ],
       ),
     );
+  }
+
+  Future<void> _approveAttendance(dynamic id, String employeeName) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Approve Attendance'),
+        content: Text(
+          'Are you sure you want to approve attendance for $employeeName?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('Approve'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      final response = await ApiService.updateAttendance(
+        attendanceId: id,
+        status: 'approved',
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              response.success
+                  ? 'Attendance approved for $employeeName'
+                  : response.message ?? 'Failed to approve',
+            ),
+            backgroundColor: response.success ? Colors.green : Colors.red,
+          ),
+        );
+
+        if (response.success) {
+          setState(() {
+            isLoadingPending = true;
+            isLoadingApproved = true;
+          });
+          _loadAllData();
+        }
+      }
+    }
+  }
+
+  Future<void> _rejectAttendance(dynamic id, String employeeName) async {
+    final notesController = TextEditingController();
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reject Attendance'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Are you sure you want to reject attendance for $employeeName?'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: notesController,
+              decoration: const InputDecoration(
+                labelText: 'Reason (optional)',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      final response = await ApiService.updateAttendance(
+        attendanceId: id,
+        status: 'rejected',
+        notes: notesController.text.isNotEmpty ? notesController.text : null,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              response.success
+                  ? 'Attendance rejected for $employeeName'
+                  : response.message ?? 'Failed to reject',
+            ),
+            backgroundColor: response.success ? Colors.red : Colors.grey,
+          ),
+        );
+
+        if (response.success) {
+          setState(() {
+            isLoadingPending = true;
+            isLoadingRejected = true;
+          });
+          _loadAllData();
+        }
+      }
+    }
   }
 
   void _showFilters() {
@@ -278,6 +536,7 @@ class _AttendanceApprovalsPageState extends State<AttendanceApprovalsPage>
                   onSelected: (selected) {
                     setState(() => selectedDate = date);
                     Navigator.pop(context);
+                    _loadAllData();
                   },
                 );
               }).toList(),
